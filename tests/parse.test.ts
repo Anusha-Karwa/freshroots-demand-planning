@@ -58,6 +58,16 @@ describe("mapColumns", () => {
     const m = mapColumns("skus", ["sku_id", "name"]);
     expect(m.missingRequired).toEqual(["isPerishable", "standardOrderQty"]);
   });
+  it("lets the user mark a field as not in the file", () => {
+    const m = mapColumns("skus", ["sku_id", "name", "perishable", "moq", "price"], { unitPrice: "" });
+    expect(m.mapped.unitPrice).toBeUndefined();
+    expect(m.unmapped).toContain("price");
+  });
+  it("gives an explicitly assigned header to that field, not an earlier alias match", () => {
+    const m = mapColumns("skus", ["sku_id", "name", "perishable", "moq", "cost"], { unitPrice: "cost" });
+    expect(m.mapped).toMatchObject({ unitPrice: "cost" });
+    expect(m.mapped.unitCost).toBeUndefined();
+  });
   it("lets a manual override win", () => {
     const m = mapColumns("weekly_sales", ["Wk", "Mat", "Cust", "Qty"], { weekStart: "Wk", skuId: "Mat", distributorId: "Cust" });
     expect(m.missingRequired).toEqual([]);

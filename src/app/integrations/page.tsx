@@ -1,9 +1,11 @@
 import { integrationStatuses } from "@/lib/integrations";
 import { dbMode } from "@/lib/db";
+import { requireUser } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
-export default function IntegrationsPage() {
+export default async function IntegrationsPage() {
+  await requireUser();
   const rows = integrationStatuses();
   return (
     <div className="space-y-4">

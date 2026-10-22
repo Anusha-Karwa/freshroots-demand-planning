@@ -1,21 +1,13 @@
 import { getDb } from "@/lib/db";
+import { requireUser } from "@/lib/auth";
 import { getActiveRules } from "@/lib/settings";
 import { loadHistory, loadSkus, loadStockSnapshots } from "@/lib/rules/data";
 import { runBacktest, type Confusion } from "@/lib/rules/backtest";
 import { MONTHS, num, rupees } from "@/lib/ui/format";
+import { Tile } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
 
-function Tile({ label, value, sub, tone }: { label: string; value: string; sub?: React.ReactNode; tone?: "good" | "bad" }) {
-  const color = tone === "good" ? "text-emerald-700" : tone === "bad" ? "text-red-700" : "";
-  return (
-    <div className="rounded border border-stone-200 bg-white p-4">
-      <div className="text-xs uppercase tracking-wide text-stone-500">{label}</div>
-      <div className={`mt-1 text-2xl font-semibold ${color}`}>{value}</div>
-      {sub && <div className="mt-1 text-xs text-stone-500">{sub}</div>}
-    </div>
-  );
-}
 
 const ConfusionLine = ({ c }: { c: Confusion }) => (
   <span>
@@ -24,8 +16,10 @@ const ConfusionLine = ({ c }: { c: Confusion }) => (
 );
 
 export default async function BacktestPage() {
+  await requireUser();
   const db = await getDb();
-  const [history, skus, snapshots, rules] = await Promise.all([loadHistory(db), loadSkus(db), loadStockSnapshots(db), getActiveRules()]);
+  const rules = await getActiveRules();
+  const [history, skus, snapshots] = await Promise.all([loadHistory(db), loadSkus(db, rules.config), loadStockSnapshots(db)]);
   if (!history.weeks.length) return <p className="text-sm text-stone-500">No sales data loaded yet — run <code>npm run seed</code>.</p>;
   const r = runBacktest(history, skus, rules.config, snapshots);
   const hd = r.highDemand;

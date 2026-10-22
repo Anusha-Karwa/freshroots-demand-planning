@@ -85,5 +85,15 @@ Decisions made without asking. Each one is easy to change; say so if any is wron
 - Two extra env vars beyond the prompt's list: `VIEWER_PASSWORD` (read-only login for Deepa/CEO, the
   `viewer` role) and `VIEWER_EMAIL` (where the red kill-switch alert goes).
 - With no `DASHBOARD_PASSWORD`, local dev skips login and treats everyone as the planner.
+- Login is a shared password per role; each person types their name at sign-in, and that name is what the
+  decision log and rules history record. Fine for an MVP with two roles; swap for real accounts later.
+- "Bulk approve for stockout risk only after viewing" = the bulk form lists every stockout line with its
+  numbers, each line can be unticked, and a required "I have reviewed these lines" box must be ticked.
+- Decisions can be changed until the line is on a purchase order. Editing to the recommended quantity counts as
+  an approval (the reason is still kept).
+- SAP uploads add to / update existing data (seed loads replace it). If a SKU-week has both SKU-level and
+  distributor-level rows, the distributor detail is kept. A load check warns when the newest week covers only
+  some SKUs, since missing SKUs would read as zero sales.
+- Zoho is skipped for now (account sign-up was blocked on Zoho's side): purchase orders stay in mock mode.
 - Vercel Cron schedules are in UTC: forecast `30 0 * * 1,4` (Mon + Thu 06:00 IST), tracker `30 1 * * *`
   (07:00 IST daily).

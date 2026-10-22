@@ -21,7 +21,7 @@ export async function runForecast(trigger: "cron" | "manual"): Promise<RunSummar
   const rules = await getActiveRules();
   const [run] = await db.insert(schema.forecastRuns).values({ trigger, rulesVersion: rules.version }).returning({ id: schema.forecastRuns.id });
   try {
-    const data = await loadPlanningInputs(db);
+    const data = await loadPlanningInputs(db, rules.config);
     if (!data) throw new Error("No sales data loaded — run npm run seed first.");
     const evaluations = data.inputs.map((s) => evaluateSku(s, rules.config, data.planningMonth));
 

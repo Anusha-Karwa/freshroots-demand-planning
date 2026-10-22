@@ -342,6 +342,11 @@ async function loadOne(ctx: Ctx, type: FileType, src: string): Promise<FileRepor
 
 /** Rebuild SKU-level weekly totals from SKU × distributor sales. The rules engine reads this table. */
 export async function rebuildSkuWeekly(db: Db) {
+  // If a SKU-week has both SKU-level (ALL) and distributor-level rows, keep the distributor detail so the
+  // week is never counted twice.
+  await db.execute(sql`
+    delete from weekly_sales a where a.distributor_id = ${ALL_DISTRIBUTORS}
+    and exists (select 1 from weekly_sales b where b.week_start = a.week_start and b.sku_id = a.sku_id and b.distributor_id <> ${ALL_DISTRIBUTORS})`);
   await db.execute(sql`delete from sku_weekly_sales`);
   await db.execute(sql`
     insert into sku_weekly_sales (week_start, sku_id, units, distributor_count)
@@ -391,6 +396,19 @@ async function runChecks(db: Db, ctx: Ctx, reports: FileReport[]): Promise<Check
           (offGrid.length ? `; not on a 7-day grid: ${offGrid.slice(0, 5).join(", ")}` : "")
         : "no sales loaded",
     });
+    // The newest week should cover every SKU that sells; a partial week reads as zero sales for the rest.
+    const [cov] = (
+      await db.execute<{ week: string; with_sales: number; selling: number }>(sql`
+        select (select max(week_start)::text from sku_weekly_sales) as week,
+               (select count(*)::int from sku_weekly_sales where week_start = (select max(week_start) from sku_weekly_sales)) as with_sales,
+               (select count(distinct sku_id)::int from sku_weekly_sales) as selling`)
+    ).rows;
+    if (cov.week)
+      checks.push({
+        name: "Latest week has sales for every SKU",
+        passed: cov.with_sales === cov.selling,
+        detail: `${cov.week}: ${cov.with_sales} of ${cov.selling} SKUs` + (cov.with_sales < cov.selling ? " — the rest will read as zero sales; upload the full week" : ""),
+      });
     // Per SKU: weeks inside the SKU's own sales range with no row (a gap, not a late launch).
     const skuGaps = (
       await db.execute<{ sku_id: string; missing: number }>(sql`

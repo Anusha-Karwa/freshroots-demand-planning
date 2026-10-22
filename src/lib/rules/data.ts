@@ -2,6 +2,7 @@ import { sql } from "drizzle-orm";
 import { schema, type Db } from "@/lib/db";
 import { ALL_DISTRIBUTORS } from "@/lib/db/schema";
 import { addDays, monthOfWeek } from "@/lib/seed/parse";
+import { isPerishable, type RulesConfig } from "@/lib/config/rules";
 import type { SkuInput } from "./engine";
 
 export interface SkuInfo {
@@ -23,10 +24,12 @@ export interface SalesHistory {
   hasDistributorDetail: boolean;
 }
 
-export async function loadSkus(db: Db): Promise<SkuInfo[]> {
-  const rows = await db.select().from(schema.skus).where(sql`${schema.skus.active}`);
+/** Active SKUs. With `config`, perishability includes Raghav's overrides from the rules config. */
+export async function loadSkus(db: Db, config?: RulesConfig): Promise<SkuInfo[]> {
+  const rows = await db.select().from(schema.skus).where(sql`${schema.skus.active}`).orderBy(schema.skus.skuId);
   return rows.map((r) => ({
-    skuId: r.skuId, name: r.name, category: r.category, isPerishable: r.isPerishable,
+    skuId: r.skuId, name: r.name, category: r.category,
+    isPerishable: config ? isPerishable(config, r.skuId, r.isPerishable) : r.isPerishable,
     standardOrderQty: r.standardOrderQty, unitCost: r.unitCost, unitPrice: r.unitPrice,
     priceSource: r.priceSource, vendorId: r.vendorId,
   }));
@@ -107,8 +110,8 @@ export interface PlanningInputs {
 }
 
 /** Everything the engine needs for a run on the latest data. */
-export async function loadPlanningInputs(db: Db): Promise<PlanningInputs | null> {
-  const [skus, history, stock] = await Promise.all([loadSkus(db), loadHistory(db), loadStock(db)]);
+export async function loadPlanningInputs(db: Db, config: RulesConfig): Promise<PlanningInputs | null> {
+  const [skus, history, stock] = await Promise.all([loadSkus(db, config), loadHistory(db), loadStock(db)]);
   if (!history.weeks.length) return null;
   const last = history.weeks.length - 1;
   const lastWeek = history.weeks[last];

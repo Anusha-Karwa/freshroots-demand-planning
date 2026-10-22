@@ -97,16 +97,25 @@ export interface ColumnMapping {
   unmapped: string[];
 }
 
-/** Match a file's headers to fields. `overrides` (field → header) wins, e.g. from the SAP upload mapping step. */
+/**
+ * Match a file's headers to fields. `overrides` (field → header) wins, e.g. from the SAP upload mapping step;
+ * an override of "" means "this field is not in the file".
+ */
 export function mapColumns(type: FileType, headers: string[], overrides: Record<string, string> = {}): ColumnMapping {
   const byNorm = new Map(headers.map((h) => [normaliseHeader(h), h]));
   const mapped: Record<string, string> = {};
   const used = new Set<string>();
+  // Explicit choices first, so automatic matching can't take a header the user assigned elsewhere.
   for (const f of FILE_SPECS[type].fields) {
-    const override = overrides[f.field];
-    const hit = override && headers.includes(override)
-      ? override
-      : [f.field, ...f.aliases].map((a) => byNorm.get(normaliseHeader(a))).find((h) => h && !used.has(h));
+    const o = overrides[f.field];
+    if (o && headers.includes(o) && !used.has(o)) {
+      mapped[f.field] = o;
+      used.add(o);
+    }
+  }
+  for (const f of FILE_SPECS[type].fields) {
+    if (f.field in overrides) continue;
+    const hit = [f.field, ...f.aliases].map((a) => byNorm.get(normaliseHeader(a))).find((h) => h && !used.has(h));
     if (hit) {
       mapped[f.field] = hit;
       used.add(hit);
