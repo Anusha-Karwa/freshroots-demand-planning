@@ -1,0 +1,13 @@
+node_modules/
+.next/
+out/
+.env
+.env.local
+.env.*.local
+.data/
+*.tsbuildinfo
+next-env.d.ts
+.vercel
+# Seed data is supplied by the team and may be large; keep it out of git unless decided otherwise.
+data/seed/*
+!data/seed/README.md

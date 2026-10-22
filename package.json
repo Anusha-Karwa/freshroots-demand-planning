@@ -1,0 +1,43 @@
+{
+  "name": "freshroots-demand-planning",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "tsc --noEmit",
+    "test": "vitest run",
+    "seed": "tsx scripts/seed.ts",
+    "seed:sample": "tsx scripts/seed.ts --dir data/sample",
+    "zoho:sync-items": "tsx scripts/zoho-sync-items.ts",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "tsx scripts/db-migrate.ts"
+  },
+  "dependencies": {
+    "@electric-sql/pglite": "0.5.11",
+    "@google/genai": "2.30.0",
+    "drizzle-orm": "0.45.4",
+    "next": "16.4.2",
+    "papaparse": "5.7.0",
+    "pg": "8.23.1",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "resend": "6.34.1",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "4.3.3",
+    "@types/node": "^22",
+    "@types/papaparse": "^5",
+    "@types/pg": "^8",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "drizzle-kit": "0.31.11",
+    "tailwindcss": "4.3.3",
+    "tsx": "4.23.15",
+    "typescript": "^5.9",
+    "vitest": "5.0.5"
+  }
+}
