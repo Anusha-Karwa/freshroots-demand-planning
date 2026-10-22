@@ -16,6 +16,7 @@ export const EXCEPTION_LABEL: Record<ExceptionType, string> = {
   DISTRIBUTOR_CONCENTRATION: "One distributor drives the change",
   WOW_SWING: "Large week-on-week swing",
   CONFLICTING_FLAGS: "Rules conflict",
+  AI_UNUSUAL: "Looks unusual (AI)",
 };
 
 /** Two-line, numbers-only explanation. Used as-is in mock mode and as Gemini's fallback. */
@@ -48,6 +49,8 @@ export function templateExceptionNote(e: Extract<Evaluation, { kind: "exception"
         return `Distributor ${m.topDistributor?.id} drove ${Math.round(m.topDistributor?.sharePct ?? 0)}% of last week's change.`;
       case "CONFLICTING_FLAGS":
         return `Demand is up ${pct(m.pct4v12 ?? 0)} but stock already covers ${n1(m.weeksOfCover ?? 0)} weeks.`;
+      case "AI_UNUSUAL":
+        return "Gemini thought this flag looks unusual.";
     }
   });
   const flags = e.ruleFlags.length ? ` Rules alone would flag: ${e.ruleFlags.map((f) => FLAG_LABEL[f]).join(", ")}.` : "";

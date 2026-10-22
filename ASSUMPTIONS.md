@@ -81,6 +81,26 @@ Decisions made without asking. Each one is easy to change; say so if any is wron
 - Kill-switch outcome threshold is stored as ₹11 L/month (as written in the prompt) rather than derived
   from ₹34 L ÷ 3 = ₹11.3 L.
 
+## AI (Gemini)
+- One Gemini call per flag returns JSON `{reason, unusual, unusualWhy}`, validated before use. There is no
+  quantity field; anything malformed, slow or failing falls back to the template reason. Calls run 5 at a time.
+- "Routes unusual cases to exceptions": rule-based exceptions are routed first; Gemini can additionally move a
+  rule flag to the exceptions queue (type "Looks unusual (AI)") with its reason. Raghav still decides; the rule
+  flags are shown with it. In mock mode nothing is AI-routed.
+
+## Measurement
+- **Daily early warning** compares the latest week's actual units with the forecast for that week — the one a
+  run saved, or (for history no run planned) the rules re-run on the weeks before it. SAP sales arrive weekly,
+  so the daily job's numbers change when a new week is loaded. More than 25% off forecast is flagged.
+- **Stockout incidents** are detected when a SKU that sold last week has 0 stock; the estimate is one week of
+  forecast demand at unit price. Planners can also add incidents by hand.
+- **Monthly ₹ losses** (primary metric) are entered by hand from finance's numbers, as the brief allows.
+- **Kill switch**: early = edited + rejected ÷ decided recommendations over the last 4 runs that had
+  decisions (red > 50%, amber > 35%); outcome = total monthly loss > ₹11 L for the 2 latest months (red), latest
+  month alone (amber). Overall = the worse of the two; grey = not enough data.
+- **Payback** = ₹15 L ÷ (baseline midpoint ₹10.33 L/month − average loss of the last up to 3 months).
+- **Data age at decision** = days from the last day of sales data in the run to Raghav's decision.
+
 ## Product
 - Two extra env vars beyond the prompt's list: `VIEWER_PASSWORD` (read-only login for Deepa/CEO, the
   `viewer` role) and `VIEWER_EMAIL` (where the red kill-switch alert goes).

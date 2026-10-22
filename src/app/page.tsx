@@ -9,6 +9,10 @@ import type { Flag } from "@/lib/rules/engine";
 import { Card, Notice, Tile, btnCls } from "@/components/ui";
 import { rupees } from "@/lib/ui/format";
 import { runForecastNow } from "./actions";
+import { killSwitch } from "@/lib/killswitch";
+import { decisionsByRun, monthlyLossRows, toMonthLoss } from "@/lib/tracker";
+import { KillSwitchPanel } from "@/components/KillSwitchPanel";
+import { LossChart } from "@/components/LossChart";
 
 export const dynamic = "force-dynamic";
 
@@ -17,7 +21,10 @@ const IST = (d: Date) => d.toLocaleString("en-IN", { timeZone: "Asia/Kolkata", d
 export default async function OverviewPage({ searchParams }: { searchParams: Promise<{ ok?: string; error?: string }> }) {
   const user = await requireUser();
   const sp = await searchParams;
-  const [s, baseline, run, runs] = await Promise.all([dataStatus(), getBaseline(), latestRun(), recentRuns(6)]);
+  const [s, baseline, run, runs, decided, lossRows] = await Promise.all([
+    dataStatus(), getBaseline(), latestRun(), recentRuns(6), decisionsByRun(), monthlyLossRows(),
+  ]);
+  const ks = killSwitch(decided, toMonthLoss(lossRows), baseline);
   const band = monthlyLossBand(baseline);
   const [recs, exs] = run ? await Promise.all([recommendationsForRun(run.id), exceptionsForRun(run.id)]) : [[], []];
   const counts = (run?.counts ?? {}) as { byFlag?: Record<string, number> };
@@ -80,12 +87,8 @@ export default async function OverviewPage({ searchParams }: { searchParams: Pro
       </section>
 
       <div className="grid gap-3 md:grid-cols-2">
-        <Card title="Kill switch & ₹ losses vs baseline">
-          <p className="text-sm text-stone-600">
-            Arrives in phase 4: green / amber / red status from Raghav’s override rate (last {baseline.killSwitch.overrideLookbackRuns}{" "}
-            runs, red above {baseline.killSwitch.overrideRatePct}%) and monthly losses (red above {rupees(baseline.killSwitch.monthlyLossLimit)}{" "}
-            for {baseline.killSwitch.consecutiveMonths} months), the losses chart and payback on the {rupees(baseline.buildCost)} build.
-          </p>
+        <Card title="Kill switch">
+          <KillSwitchPanel k={ks} />
         </Card>
         <Card title="Baseline (before the system)">
           <dl className="grid grid-cols-1 gap-x-6 gap-y-1 text-sm sm:grid-cols-2">
@@ -100,6 +103,14 @@ export default async function OverviewPage({ searchParams }: { searchParams: Pro
           </dl>
         </Card>
       </div>
+
+      <Card title="₹ losses vs baseline" right={<Link href="/tracker" className="text-sm underline">enter monthly losses</Link>}>
+        <LossChart
+          data={lossRows.map((r) => ({ month: r.month, stockout: r.stockoutLoss, overstock: r.overstockWriteoff }))}
+          band={band}
+          limit={baseline.killSwitch.monthlyLossLimit}
+        />
+      </Card>
 
       <Card title="Recent runs">
         {runs.length === 0 ? (

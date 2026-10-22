@@ -11,7 +11,7 @@ import type { RulesConfig } from "@/lib/config/rules";
 
 export type Flag = "HIGH_DEMAND" | "STOCKOUT_RISK" | "OVERSTOCK_RISK";
 export type Action = "REORDER" | "REORDER_NOW" | "PAUSE_NEXT_ORDER";
-export type ExceptionType = "NEW_SKU" | "DISTRIBUTOR_CONCENTRATION" | "WOW_SWING" | "CONFLICTING_FLAGS";
+export type ExceptionType = "NEW_SKU" | "DISTRIBUTOR_CONCENTRATION" | "WOW_SWING" | "CONFLICTING_FLAGS" | "AI_UNUSUAL";
 
 export interface SkuInput {
   skuId: string;

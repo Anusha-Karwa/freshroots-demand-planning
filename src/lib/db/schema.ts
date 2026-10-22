@@ -151,6 +151,20 @@ export const forecastRuns = pgTable("forecast_runs", {
   error: text("error"),
 });
 
+/** Every SKU's forecast in every run (flagged or not). The tracker compares it with what actually sold. */
+export const runForecasts = pgTable(
+  "run_forecasts",
+  {
+    runId: integer("run_id").notNull(),
+    skuId: text("sku_id").notNull(),
+    planningWeek: date("planning_week").notNull(), // the week this forecast is for
+    expectedWeekly: numeric("expected_weekly", { precision: 14, scale: 3, mode: "number" }).notNull(),
+    stockOnHand: numeric("stock_on_hand", { precision: 14, scale: 3, mode: "number" }).notNull(),
+    outcome: text("outcome").notNull(), // ok | flag | exception
+  },
+  (t) => [primaryKey({ columns: [t.runId, t.skuId] }), index("run_forecasts_week_idx").on(t.planningWeek)],
+);
+
 /** One flagged SKU per run. Rules set the quantity; the AI only writes `reason`. */
 export const recommendations = pgTable(
   "recommendations",
@@ -242,12 +256,17 @@ export const mockEmails = pgTable("mock_emails", {
 // Measurement: tracker, losses, kill switch
 // ---------------------------------------------------------------------------
 
-/** Daily early-warning: actual stock depletion vs forecast, per SKU. */
+/**
+ * Daily early-warning: actual units sold vs the forecast for that week, per SKU. Recomputed every day; the
+ * numbers move when a new week of SAP data arrives.
+ */
 export const dailyTracker = pgTable(
   "daily_tracker",
   {
     date: date("date").notNull(),
     skuId: text("sku_id").notNull(),
+    week: date("week").notNull(), // the sales week compared
+    forecastSource: text("forecast_source").notNull(), // 'run' (forecast saved by a run) | 'replayed' (rules re-run on history)
     forecastUnits: numeric("forecast_units", { precision: 14, scale: 2, mode: "number" }).notNull(),
     actualUnits: numeric("actual_units", { precision: 14, scale: 2, mode: "number" }).notNull(),
     stockOnHand: numeric("stock_on_hand", { precision: 14, scale: 3, mode: "number" }),

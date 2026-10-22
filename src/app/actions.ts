@@ -11,6 +11,9 @@ import { getActiveRules } from "@/lib/settings";
 import { rulesConfigSchema, type RulesConfig } from "@/lib/config/rules";
 import { getUpload, isFileType, saveReport, saveUpload } from "@/lib/uploads";
 import { loadFiles } from "@/lib/seed/loader";
+import { getDb, schema } from "@/lib/db";
+import { eq } from "drizzle-orm";
+import { TRACKER_ALERT_PCT, updateTracker } from "@/lib/tracker";
 
 /**
  * Runs `fn`; on a validation error, comes back to `path` with the message instead of a crash page.
@@ -135,4 +138,74 @@ export async function loadUpload(formData: FormData) {
     if (report.blocked) throw new Error(`Not loaded: ${report.files[0]?.warnings.join(" ")}`);
     await saveReport(token, report);
   }, () => `/data?report=${token}`);
+}
+
+const MONTH = /^\d{4}-(0[1-9]|1[0-2])$/;
+const DATE = /^\d{4}-\d{2}-\d{2}$/;
+const rupeesField = (fd: FormData, k: string) => {
+  const v = Number(String(fd.get(k) ?? "").replace(/[₹,\s]/g, ""));
+  if (!Number.isFinite(v) || v < 0) throw new Error(`${k === "stockoutLoss" ? "Stockout loss" : "Overstock write-off"} must be a rupee amount ≥ 0.`);
+  return v;
+};
+
+export async function saveMonthlyLoss(formData: FormData) {
+  await attempt("/tracker", async () => {
+    const user = await requirePlanner();
+    const month = String(formData.get("month"));
+    if (!MONTH.test(month)) throw new Error("Pick a month.");
+    const row = {
+      month,
+      stockoutLoss: rupeesField(formData, "stockoutLoss"),
+      overstockWriteoff: rupeesField(formData, "overstockWriteoff"),
+      notes: String(formData.get("notes") ?? "").trim() || null,
+      enteredBy: user.name,
+      enteredAt: new Date(),
+    };
+    const db = await getDb();
+    await db.insert(schema.monthlyLosses).values(row).onConflictDoUpdate({ target: schema.monthlyLosses.month, set: row });
+    return `Saved losses for ${month}.`;
+  });
+}
+
+export async function addIncident(formData: FormData) {
+  await attempt("/tracker", async () => {
+    const user = await requirePlanner();
+    const date = String(formData.get("date"));
+    const skuId = String(formData.get("skuId") ?? "").trim();
+    if (!DATE.test(date) || !skuId) throw new Error("Date and SKU are required.");
+    const units = Number(formData.get("units") || 0);
+    const db = await getDb();
+    const [sku] = await db.select().from(schema.skus).where(eq(schema.skus.skuId, skuId));
+    if (!sku) throw new Error(`Unknown SKU "${skuId}".`);
+    await db.insert(schema.stockoutIncidents).values({
+      date, skuId, source: "manual", estLostUnits: units || null,
+      estLostValue: units && sku.unitPrice != null ? units * sku.unitPrice : null,
+      note: `${String(formData.get("note") ?? "").trim()} (${user.name})`.trim(),
+    });
+    return "Stockout recorded.";
+  });
+}
+
+export async function addComplaint(formData: FormData) {
+  await attempt("/tracker", async () => {
+    const user = await requirePlanner();
+    const note = String(formData.get("note") ?? "").trim();
+    const date = String(formData.get("date"));
+    if (!DATE.test(date) || note.length < 3) throw new Error("Date and a note are required.");
+    const db = await getDb();
+    await db.insert(schema.distributorComplaints).values({
+      date, note, enteredBy: user.name,
+      distributorId: String(formData.get("distributorId") ?? "").trim() || null,
+      skuId: String(formData.get("skuId") ?? "").trim() || null,
+    });
+    return "Complaint recorded.";
+  });
+}
+
+export async function refreshTracker() {
+  await attempt("/tracker", async () => {
+    await requirePlanner();
+    const r = await updateTracker();
+    return r.week ? `Tracker updated for week ${r.week}: ${r.rows} SKUs, ${r.alerts} off forecast by > ${TRACKER_ALERT_PCT}%, ${r.incidents} new stockout(s).` : "No sales data yet.";
+  });
 }

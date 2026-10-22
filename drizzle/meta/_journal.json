@@ -8,6 +8,20 @@
       "when": 1792669075489,
       "tag": "0000_init",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1792674309506,
+      "tag": "0001_run_forecasts",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1792674406353,
+      "tag": "0002_tracker_week",
+      "breakpoints": true
     }
   ]
 }

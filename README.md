@@ -19,8 +19,8 @@ dashboard; approved lines become **draft** purchase orders in Zoho Inventory, wh
 | 1 | Scaffold, `.env.example`, DB schema, seed loader, mock adapters, Integrations page; real seed data loaded | ✅ done |
 | 2 | Rules engine + unit tests + backtest page; `npm run forecast` | ✅ done |
 | 3 | Dashboard: login (planner / viewer), overview, review queue, exceptions, rules config, SAP CSV upload | ✅ done |
-| 4 | Gemini explanations, decision log, tracker, kill-switch panel | next |
-| 5 | Zoho draft PO flow, Resend emails, cron endpoints | |
+| 4 | Gemini explanations + AI routing, decision log, tracker, kill-switch panel, payback | ✅ done |
+| 5 | Draft PO flow (Zoho mock), Resend emails, cron endpoints | next |
 | 6 | Full README, deploy guide, case-requirements mapping | |
 
 ## Quick start (no API keys needed)
@@ -61,6 +61,7 @@ Header names are matched flexibly; to support a new header, add it to `aliases` 
 | Overview | all | last run, data age, items awaiting Raghav, flags by type, baseline, recent runs; planner can run the forecast now |
 | Review queue | planner decides, viewer reads | every flagged SKU with the numbers behind it; approve / edit qty / reject (reason required); bulk approve for stockout lines after ticking "I have reviewed these" |
 | Exceptions | planner decides | cases the rules can't decide; order a quantity or no action, always with a note |
+| Tracker | planner enters, all read | kill switch (green / amber / red), monthly ₹ losses vs baseline chart + entry, actual vs forecast per SKU (early warning), stockout incidents, Raghav's overrides with reasons and data age at decision, distributor complaints |
 | Rules | planner edits | thresholds, festival months and uplift, perishable list; each save is a new version with who/when/why and a diff |
 | Data | planner uploads | SAP CSV upload → column mapping → load report with rejected rows; recent loads |
 | Backtest | all | rules replayed against what actually sold |
