@@ -2,10 +2,24 @@
 
 Decisions made without asking. Each one is easy to change; say so if any is wrong.
 
-## Inputs not yet in the repo
-- **Case PDF and components map** (`MESA_Case 01 - 22 Oct.pdf`, `Freshroots_Components_Map_v2.png`) were not
-  provided with the build prompt. Phase 1 follows the prompt's own summary of the case and its components table.
-  Drop both into `docs/` and the later phases will be checked against them.
+## Source documents
+- The case (`docs/MESA_Case_01_-_22_Oct.pdf`) and the components map (`docs/Freshroots_Components_Map_v2.png`)
+  are in `docs/`. The build follows the map's lanes: Vercel Cron → SAP + demand data → cleaning into Postgres →
+  rules config → rules engine (no AI) → Gemini reasons + exceptions → Raghav's final call → Zoho draft PO +
+  Resend email → procurement confirms in Zoho; every decision is logged and feeds the daily tracker / kill switch.
+- The case mentions "the 9 checks" and "the Pre-Build Decision Checklist" but does not list them; the README's
+  requirements mapping (phase 6) will use the course's list once provided.
+- The case's "unusual distributor behaviour, new launches, one-off market events" (the 15–20% Raghav handles on
+  judgement) map to the three exception rules: new SKU (< 12 weeks), single-distributor concentration, and
+  week-on-week swings > 40%.
+- The map puts the **perishable list** in the rules config, so the Rules page (phase 3) will let Raghav change a
+  SKU's perishability as a versioned rules change, on top of the flag from the SKU file.
+- The map has Gemini "route odd cases to exceptions". Routing stays rule-based so it is predictable; Gemini can
+  additionally mark a rule-covered flag as "looks unusual", which moves it to the exceptions queue for Raghav.
+  It never changes a quantity.
+- The case says SAP holds three years of distributor-level sales; the seed data supplied is 16 weeks at SKU
+  level. The loader handles both.
+
 - **Seed data** is in `data/seed/` (15 SKUs, 4 distributors, 16 weeks: ISO weeks 2026-W27 → W42, stock as of
   19 Oct 2026). It is synthetic and small, so it is committed. The earlier placeholder sample was deleted.
 
