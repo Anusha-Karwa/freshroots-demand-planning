@@ -1,12 +1,14 @@
 import { integrationStatuses } from "@/lib/integrations";
 import { dbMode } from "@/lib/db";
 import { requireUser } from "@/lib/auth";
+import { recentEmails } from "@/lib/notify";
 
 export const dynamic = "force-dynamic";
 
 export default async function IntegrationsPage() {
   await requireUser();
   const rows = integrationStatuses();
+  const emails = await recentEmails();
   return (
     <div className="space-y-4">
       <h1 className="text-xl font-semibold">Integrations</h1>
@@ -43,6 +45,32 @@ export default async function IntegrationsPage() {
             ))}
           </tbody>
         </table>
+      </div>
+      <div className="rounded border border-stone-200 bg-white p-4 text-sm">
+        <h2 className="font-medium">Scheduled jobs (Vercel Cron, see vercel.json)</h2>
+        <ul className="mt-1 list-disc pl-5 text-stone-600">
+          <li><code>/api/cron/forecast</code> — Mon + Thu 06:00 IST: rules → Gemini reasons → email Raghav “N items awaiting your call”.</li>
+          <li><code>/api/cron/tracker</code> — daily 07:00 IST: actual vs forecast, stockouts, kill switch (email Deepa if it turns red), Zoho PO status.</li>
+        </ul>
+        <p className="mt-1 text-xs text-stone-500">Both require <code>Authorization: Bearer $CRON_SECRET</code>; Vercel sends it automatically once CRON_SECRET is set.</p>
+      </div>
+
+      <div className="rounded border border-stone-200 bg-white p-4 text-sm">
+        <h2 className="font-medium">Emails logged in mock mode</h2>
+        {emails.length === 0 ? (
+          <p className="mt-1 text-stone-500">None yet.</p>
+        ) : (
+          <ul className="mt-1 space-y-2">
+            {emails.map((e) => (
+              <li key={e.id} className="border-t border-stone-100 pt-2">
+                <div>
+                  <b>{e.subject}</b> <span className="text-xs text-stone-500">to {e.to} · {e.createdAt.toLocaleString("en-IN", { timeZone: "Asia/Kolkata", dateStyle: "short", timeStyle: "short" })}</span>
+                </div>
+                <pre className="mt-1 whitespace-pre-wrap text-xs text-stone-600">{e.body}</pre>
+              </li>
+            ))}
+          </ul>
+        )}
       </div>
     </div>
   );

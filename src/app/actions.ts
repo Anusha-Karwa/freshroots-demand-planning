@@ -14,6 +14,8 @@ import { loadFiles } from "@/lib/seed/loader";
 import { getDb, schema } from "@/lib/db";
 import { eq } from "drizzle-orm";
 import { TRACKER_ALERT_PCT, updateTracker } from "@/lib/tracker";
+import { confirmMockPurchaseOrder, createDraftPOs, retryPurchaseOrder, saveVendorMap, syncStatuses } from "@/lib/purchase-orders";
+import { notifyProcurement } from "@/lib/notify";
 
 /**
  * Runs `fn`; on a validation error, comes back to `path` with the message instead of a crash page.
@@ -207,5 +209,49 @@ export async function refreshTracker() {
     await requirePlanner();
     const r = await updateTracker();
     return r.week ? `Tracker updated for week ${r.week}: ${r.rows} SKUs, ${r.alerts} off forecast by > ${TRACKER_ALERT_PCT}%, ${r.incidents} new stockout(s).` : "No sales data yet.";
+  });
+}
+
+export async function createPOs() {
+  await attempt("/purchase-orders", async () => {
+    const user = await requirePlanner();
+    const pos = await createDraftPOs(user);
+    await notifyProcurement(pos, user.name);
+    const failed = pos.filter((p) => p.status === "failed");
+    if (failed.length === pos.length) throw new Error(`Zoho rejected every PO: ${failed[0]?.error}`);
+    return `Created ${pos.length - failed.length} draft PO(s)${failed.length ? `; ${failed.length} failed — see below` : ""}. Procurement has been emailed.`;
+  });
+}
+
+export async function retryPO(formData: FormData) {
+  await attempt("/purchase-orders", async () => {
+    const user = await requirePlanner();
+    await retryPurchaseOrder(Number(formData.get("id")), user);
+    return "Pushed again.";
+  });
+}
+
+export async function confirmMockPO(formData: FormData) {
+  await attempt("/purchase-orders", async () => {
+    await requirePlanner();
+    await confirmMockPurchaseOrder(Number(formData.get("id")));
+    return "Marked as confirmed by procurement (mock).";
+  });
+}
+
+export async function syncPOs() {
+  await attempt("/purchase-orders", async () => {
+    await requirePlanner();
+    return `${await syncStatuses()} status change(s) from Zoho.`;
+  });
+}
+
+export async function saveVendorMapAction(formData: FormData) {
+  await attempt("/purchase-orders", async () => {
+    const user = await requirePlanner();
+    const map: Record<string, string> = {};
+    for (const [k, v] of formData.entries()) if (k.startsWith("vendor:")) map[k.slice(7)] = String(v);
+    await saveVendorMap(map, user);
+    return "Saved supplier → Zoho vendor mapping.";
   });
 }

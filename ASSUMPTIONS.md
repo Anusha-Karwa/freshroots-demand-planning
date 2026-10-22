@@ -101,6 +101,23 @@ Decisions made without asking. Each one is easy to change; say so if any is wron
 - **Payback** = ₹15 L ÷ (baseline midpoint ₹10.33 L/month − average loss of the last up to 3 months).
 - **Data age at decision** = days from the last day of sales data in the run to Raghav's decision.
 
+## Orders, emails, schedule
+- **Only the latest run's approved lines** go on purchase orders, so an older approval can't double-order a
+  SKU. Approved "pause" lines (qty 0) and rejected lines are not ordered. Ordered exceptions use Raghav's qty.
+- **One draft PO per supplier** (the SKU file's Distributor_ID). Each supplier maps to a Zoho vendor id on the
+  Purchase orders page; unmapped suppliers go to `ZOHO_DEFAULT_VENDOR_ID`. PO rates are unit costs (placeholder
+  for now, and the PO notes say so).
+- POs are only ever created as Zoho **drafts**; procurement confirms in Zoho, and the daily job syncs the status
+  back. In mock mode a "simulate procurement confirming" link stands in for that.
+- A Zoho failure for one supplier doesn't stop the others; the failed PO keeps its lines and can be retried.
+- The live Zoho client (token refresh + cache, 429/5xx retries, 401 re-auth, API log) is tested against a fake
+  Zoho server only — Zoho sign-up was blocked, so it has not run against the real API yet.
+- **Emails**: planner after each scheduled run (skipped when nothing is flagged), procurement after POs are
+  created, Deepa when the kill switch *turns* red (not every day it stays red). With an address unset, mock mode
+  still logs the email (to "… not set"); live mode skips it.
+- **The forecast job uses the latest data loaded** (seed or SAP upload). There is no SAP API in scope; the IT
+  team uploads the export on the Data page (or a later job can drop it in). Data age is shown everywhere.
+
 ## Product
 - Two extra env vars beyond the prompt's list: `VIEWER_PASSWORD` (read-only login for Deepa/CEO, the
   `viewer` role) and `VIEWER_EMAIL` (where the red kill-switch alert goes).

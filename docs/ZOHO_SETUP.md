@@ -9,7 +9,10 @@ Do these in the browser (about 15 minutes), then the refresh-token step from a t
 4. api-console.zoho.in → Add Client → **Self Client** → copy Client ID / Secret → `ZOHO_CLIENT_ID`, `ZOHO_CLIENT_SECRET`.
 5. Self Client → Generate Code, scope:
    `ZohoInventory.purchaseorders.CREATE,ZohoInventory.purchaseorders.READ,ZohoInventory.items.CREATE,ZohoInventory.items.READ,ZohoInventory.contacts.READ,ZohoInventory.settings.READ`
-   — duration 10 minutes. Use the code within 10 minutes to get a refresh token (script added in phase 5)
-   and put it in `.env` as `ZOHO_REFRESH_TOKEN`.
+   — duration 10 minutes. Within those 10 minutes run `npm run zoho:refresh-token -- <code>` and put the
+   printed value in `.env` (and Vercel) as `ZOHO_REFRESH_TOKEN`.
+6. On the app's Purchase orders page, map each supplier (DIST001…) to its Zoho vendor id.
+7. Optional: `npm run zoho:sync-items -- --limit 20` creates Zoho items for the SKUs (so PO lines link to items).
+8. The Integrations page shows Zoho as Live once all ZOHO_* variables are set.
 
 Purchase orders are always created as **drafts**; procurement confirms them inside Zoho.

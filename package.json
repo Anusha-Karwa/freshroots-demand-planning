@@ -13,7 +13,8 @@
     "zoho:sync-items": "tsx scripts/zoho-sync-items.ts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx scripts/db-migrate.ts",
-    "forecast": "tsx scripts/forecast.ts"
+    "forecast": "tsx scripts/forecast.ts",
+    "zoho:refresh-token": "tsx scripts/zoho-get-refresh-token.ts"
   },
   "dependencies": {
     "@electric-sql/pglite": "0.5.11",

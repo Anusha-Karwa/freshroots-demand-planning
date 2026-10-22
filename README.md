@@ -20,15 +20,15 @@ dashboard; approved lines become **draft** purchase orders in Zoho Inventory, wh
 | 2 | Rules engine + unit tests + backtest page; `npm run forecast` | ✅ done |
 | 3 | Dashboard: login (planner / viewer), overview, review queue, exceptions, rules config, SAP CSV upload | ✅ done |
 | 4 | Gemini explanations + AI routing, decision log, tracker, kill-switch panel, payback | ✅ done |
-| 5 | Draft PO flow (Zoho mock), Resend emails, cron endpoints | next |
-| 6 | Full README, deploy guide, case-requirements mapping | |
+| 5 | Draft PO flow (Zoho live client + mock), Resend emails, cron endpoints | ✅ done |
+| 6 | Full README, deploy guide, case-requirements mapping | next |
 
 ## Quick start (no API keys needed)
 
 ```bash
 npm install
 npm run seed            # loads data/seed/*.csv
-npm run forecast        # run the rules on the loaded data and save the run
+npm run forecast        # run the rules on the loaded data and save the run (the cron job does this Mon + Thu)
 npm run dev             # http://localhost:3000
 npm test
 ```
@@ -61,6 +61,7 @@ Header names are matched flexibly; to support a new header, add it to `aliases` 
 | Overview | all | last run, data age, items awaiting Raghav, flags by type, baseline, recent runs; planner can run the forecast now |
 | Review queue | planner decides, viewer reads | every flagged SKU with the numbers behind it; approve / edit qty / reject (reason required); bulk approve for stockout lines after ticking "I have reviewed these" |
 | Exceptions | planner decides | cases the rules can't decide; order a quantity or no action, always with a note |
+| Purchase orders | planner creates | approved lines grouped into one draft PO per supplier → Zoho (or MOCK); status, retries, supplier → Zoho vendor mapping, Zoho API log |
 | Tracker | planner enters, all read | kill switch (green / amber / red), monthly ₹ losses vs baseline chart + entry, actual vs forecast per SKU (early warning), stockout incidents, Raghav's overrides with reasons and data age at decision, distributor complaints |
 | Rules | planner edits | thresholds, festival months and uplift, perishable list; each save is a new version with who/when/why and a diff |
 | Data | planner uploads | SAP CSV upload → column mapping → load report with rejected rows; recent loads |
@@ -82,6 +83,23 @@ Every external service has a mock mode that switches on automatically when its k
 | Zoho Inventory | Draft POs in `mock_zoho_purchase_orders`, labelled MOCK |
 | Resend | Emails logged to console + `mock_emails` |
 
+## Scheduled jobs
+
+| Route | When (vercel.json, UTC) | What |
+|---|---|---|
+| `/api/cron/forecast` | `30 0 * * 1,4` = Mon + Thu 06:00 IST | rules on the latest loaded data → Gemini reasons → email Raghav "N items awaiting your call" |
+| `/api/cron/tracker` | `30 1 * * *` = daily 07:00 IST | actual vs forecast, stockouts, kill switch (emails Deepa when it turns red), Zoho PO status sync |
+
+Both need `Authorization: Bearer $CRON_SECRET` (Vercel sends it once `CRON_SECRET` is set). Locally:
+`curl -H "Authorization: Bearer $CRON_SECRET" localhost:3000/api/cron/forecast`.
+
+## Zoho scripts (live mode)
+
+```bash
+npm run zoho:refresh-token -- <grant-code>   # one-time: grant code → refresh token (see docs/ZOHO_SETUP.md)
+npm run zoho:sync-items -- --limit 20        # create Zoho items for SKUs that don't have one yet
+```
+
 ## Project layout
 
 ```
@@ -91,6 +109,11 @@ src/lib/seed/              column mapping, parsing, loader + validation
 src/lib/rules/engine.ts    Raghav's rules — pure functions, no AI (tests/rules.test.ts)
 src/lib/rules/run.ts       data → rules → decision log (forecast_runs, recommendations, exceptions)
 src/lib/rules/backtest.ts  replay past weeks vs what actually sold
+src/lib/purchase-orders.ts approved lines → one draft PO per supplier
+src/lib/tracker.ts         actual vs forecast, stockouts, override log
+src/lib/killswitch.ts      green / amber / red + payback (tests/killswitch.test.ts)
+src/lib/notify.ts          the three emails
+src/app/api/cron/          the two scheduled jobs
 src/lib/adapters/          gemini, zoho, email — live or mock
 src/lib/integrations.ts    live/mock detection
 scripts/                   seed, db-migrate
