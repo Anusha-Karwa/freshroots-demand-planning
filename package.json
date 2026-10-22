@@ -10,7 +10,6 @@
     "lint": "tsc --noEmit",
     "test": "vitest run",
     "seed": "tsx scripts/seed.ts",
-    "seed:sample": "tsx scripts/seed.ts --dir data/sample",
     "zoho:sync-items": "tsx scripts/zoho-sync-items.ts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx scripts/db-migrate.ts"

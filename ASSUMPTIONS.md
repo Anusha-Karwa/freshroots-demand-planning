@@ -6,8 +6,8 @@ Decisions made without asking. Each one is easy to change; say so if any is wron
 - **Case PDF and components map** (`MESA_Case 01 - 22 Oct.pdf`, `Freshroots_Components_Map_v2.png`) were not
   provided with the build prompt. Phase 1 follows the prompt's own summary of the case and its components table.
   Drop both into `docs/` and the later phases will be checked against them.
-- **Seed data** has not arrived. `data/sample/` is a 5-SKU / 3-distributor / 20-week placeholder used only to
-  test code. It will be deleted after the real files load.
+- **Seed data** is in `data/seed/` (15 SKUs, 4 distributors, 16 weeks: ISO weeks 2026-W27 → W42, stock as of
+  19 Oct 2026). It is synthetic and small, so it is committed. The earlier placeholder sample was deleted.
 
 ## Data & database
 - **Local database without `DATABASE_URL` is PGlite** (real Postgres compiled to WASM, stored in `./.data/pglite`)
@@ -16,9 +16,13 @@ Decisions made without asking. Each one is easy to change; say so if any is wron
 - **ORM is Drizzle** (the prompt allowed Prisma or Drizzle). Drizzle supports both PGlite and node-postgres
   from one schema; Prisma would need separate SQLite/Postgres schemas.
 - **Seed files are CSV** with a header row. Excel files should be saved as CSV first.
-- **A week is identified by its start date** (`week_start`, normally a Monday). "No missing weeks" means every
-  7-day step between the first and last sales week has at least one sales row, and every calendar week in
-  that range has sales.
+- **A week is identified by its Monday.** ISO week labels (`2026-W27`) are converted to that Monday.
+  "No missing weeks" means every 7-day step between the first and last sales week has rows, overall and
+  within each SKU's own history.
+- **The calendar is monthly** (as supplied). A sales week belongs to the month its Thursday falls in (ISO
+  convention, so a week is never split across months). Sales weeks outside the calendar are rejected.
+- **Festival months**: the rules config (editable, versioned) is what the engine uses; the seed loader checks
+  that the calendar's festival months agree with it (both are Mar, Oct, Nov today).
 - **Sales/stock quantities are decimals** (numeric), since SAP exports can carry kg/litre units.
 - **Negative sales units are accepted** (returns/credit notes); only negative *stock* is rejected, as the prompt asks.
 - **Duplicate rows** (same week × SKU × distributor) — the last one in the file wins; duplicates are counted
@@ -27,8 +31,17 @@ Decisions made without asking. Each one is easy to change; say so if any is wron
 - **`npm run seed` is a full reload**: it clears master data, sales and stock first (run history,
   decisions and POs are kept). The SAP CSV upload (phase 3) upserts on top instead.
 - **SKU rows with standard order qty ≤ 0 are rejected**, since the 1.5× rule needs a positive quantity.
-- **Seed files are git-ignored** (`data/seed/*`) so large or sensitive data never lands in the repo by accident.
-  Say if you want the synthetic files committed.
+- **Sales have no distributor column** (confirmed with Anusha). Sales are stored per SKU (distributor `ALL`),
+  and rule 6b — "a single distributor drives > 40% of the week-on-week change" — is **off** until a sales file
+  with a distributor column is loaded; it then switches on automatically.
+- **`Distributor_ID` on the SKU file is the SKU's supplier** (confirmed). Approved lines are grouped into one
+  draft PO per supplier; each supplier is mapped to a Zoho vendor in phase 5.
+- **Prices are placeholders** (confirmed). The SKU file has no cost/price, so `data/placeholder_prices.csv`
+  supplies a made-up cost and price per SKU. Those SKUs are marked `price_source = placeholder` and every ₹
+  figure built on them is labelled *estimated*. Adding `Unit_Cost` / `Unit_Price` columns to the SKU file
+  replaces them.
+- **Short history**: 16 weeks with a 12-week average leaves about 4 historical runs to backtest, not 6–12 months.
+- The distributor file includes Karnataka and Gujarat; the case says Maharashtra + Goa. Loaded as supplied.
 
 ## Rules
 - Rules and the baseline/kill-switch numbers live in the database (`rules_config_versions`, `app_settings`),

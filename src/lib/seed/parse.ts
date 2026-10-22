@@ -30,11 +30,28 @@ export function parseInt0(raw: string): Parsed<number> {
 
 const pad = (n: number) => String(n).padStart(2, "0");
 
-/** Accepts YYYY-MM-DD, DD-MM-YYYY, DD/MM/YYYY, DD.MM.YYYY (SAP), YYYYMMDD. Returns YYYY-MM-DD. */
+/** Monday of ISO week `week` in ISO year `year`. */
+export function isoWeekMonday(year: number, week: number): string {
+  const jan4 = new Date(Date.UTC(year, 0, 4)); // Jan 4 is always in ISO week 1
+  const mondayW1 = Date.UTC(year, 0, 4 - ((jan4.getUTCDay() + 6) % 7));
+  return new Date(mondayW1 + (week - 1) * 7 * 86_400_000).toISOString().slice(0, 10);
+}
+
+/**
+ * Accepts YYYY-MM-DD, DD-MM-YYYY, DD/MM/YYYY, DD.MM.YYYY (SAP), YYYYMMDD, and ISO weeks
+ * (2026-W27, 2026W27 → the Monday of that week). Returns YYYY-MM-DD.
+ */
 export function parseDate(raw: string): Parsed<string> {
   const v = raw.trim();
   let y: number, m: number, d: number;
   let match: RegExpMatchArray | null;
+  if ((match = v.match(/^(\d{4})-?W(\d{1,2})$/i))) {
+    const [year, week] = [+match[1], +match[2]];
+    const monday = isoWeekMonday(year, week);
+    // A week belongs to the ISO year its Thursday falls in; that rules out W53 in 52-week years.
+    if (week < 1 || week > 53 || addDays(monday, 3).slice(0, 4) !== String(year)) return fail(`invalid ISO week: "${raw}"`);
+    return ok(monday);
+  }
   if ((match = v.match(/^(\d{4})-(\d{1,2})-(\d{1,2})(?:[T ].*)?$/))) [y, m, d] = [+match[1], +match[2], +match[3]];
   else if ((match = v.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})$/))) [d, m, y] = [+match[1], +match[2], +match[3]];
   else if ((match = v.match(/^(\d{4})(\d{2})(\d{2})$/))) [y, m, d] = [+match[1], +match[2], +match[3]];
@@ -78,3 +95,6 @@ export function missingWeeks(present: Iterable<string>, first?: string, last?: s
   for (let w = start; w <= end; w = addDays(w, 7)) if (!set.has(w)) out.push(w);
   return out;
 }
+
+/** "YYYY-MM" a week belongs to: the month of its Thursday (ISO convention, so a week is never split). */
+export const monthOfWeek = (weekStart: string) => addDays(weekStart, 3).slice(0, 7);

@@ -16,7 +16,7 @@ dashboard; approved lines become **draft** purchase orders in Zoho Inventory, wh
 
 | Phase | Scope | State |
 |---|---|---|
-| 1 | Scaffold, `.env.example`, DB schema, seed loader, mock adapters, Integrations page | ✅ done |
+| 1 | Scaffold, `.env.example`, DB schema, seed loader, mock adapters, Integrations page; real seed data loaded | ✅ done |
 | 2 | Rules engine + unit tests + backtest page | next |
 | 3 | Dashboard: overview, review queue, exceptions, rules config, SAP CSV upload | |
 | 4 | Gemini explanations, decision log, tracker, kill-switch panel | |
@@ -27,7 +27,7 @@ dashboard; approved lines become **draft** purchase orders in Zoho Inventory, wh
 
 ```bash
 npm install
-npm run seed            # loads data/seed/*.csv (or: npm run seed:sample for the 5-SKU placeholder)
+npm run seed            # loads data/seed/*.csv
 npm run dev             # http://localhost:3000
 npm test
 ```
@@ -43,6 +43,10 @@ Place the five CSVs in `data/seed/` (see `data/seed/README.md`), then:
 npm run seed -- --inspect   # show the columns found in each file and how they map — loads nothing
 npm run seed                # load + validate; prints accepted/rejected rows and the checks
 ```
+
+Current data: 15 SKUs, 4 distributors, weekly sales for ISO weeks 2026-W27 → W42 (per SKU, no distributor
+split), stock as of 19 Oct 2026, a monthly festival calendar for 2025–26. Prices are placeholders from
+`data/placeholder_prices.csv` until real ones arrive; ₹ figures built on them are marked *estimated*.
 
 Validation: every sales row's SKU and distributor must exist; no negative stock; no missing weeks.
 Rejected rows are listed with row number and reason, and stored in the `rejected_rows` table.

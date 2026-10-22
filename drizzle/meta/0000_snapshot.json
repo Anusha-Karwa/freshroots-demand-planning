@@ -1,5 +1,5 @@
 {
-  "id": "47d3a9ed-ebf6-488c-beb3-2126791abefa",
+  "id": "d73f943f-ad51-4bb8-9630-1b4c232f918e",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
@@ -42,24 +42,18 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.calendar_weeks": {
-      "name": "calendar_weeks",
+    "public.calendar_months": {
+      "name": "calendar_months",
       "schema": "",
       "columns": {
-        "week_start": {
-          "name": "week_start",
-          "type": "date",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "month": {
-          "name": "month",
+        "year": {
+          "name": "year",
           "type": "integer",
           "primaryKey": false,
           "notNull": true
         },
-        "year": {
-          "name": "year",
+        "month": {
+          "name": "month",
           "type": "integer",
           "primaryKey": false,
           "notNull": true
@@ -92,7 +86,15 @@
       },
       "indexes": {},
       "foreignKeys": {},
-      "compositePrimaryKeys": {},
+      "compositePrimaryKeys": {
+        "calendar_months_year_month_pk": {
+          "name": "calendar_months_year_month_pk",
+          "columns": [
+            "year",
+            "month"
+          ]
+        }
+      },
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},
@@ -1094,6 +1096,12 @@
           "primaryKey": false,
           "notNull": false
         },
+        "price_source": {
+          "name": "price_source",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "vendor_id": {
           "name": "vendor_id",
           "type": "text",
@@ -1269,19 +1277,6 @@
           ],
           "columnsTo": [
             "sku_id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "weekly_sales_distributor_id_distributors_distributor_id_fk": {
-          "name": "weekly_sales_distributor_id_distributors_distributor_id_fk",
-          "tableFrom": "weekly_sales",
-          "tableTo": "distributors",
-          "columnsFrom": [
-            "distributor_id"
-          ],
-          "columnsTo": [
-            "distributor_id"
           ],
           "onDelete": "no action",
           "onUpdate": "no action"

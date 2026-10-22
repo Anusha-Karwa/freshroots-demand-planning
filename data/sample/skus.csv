@@ -1,6 +1,0 @@
-sku_id,sku_name,category,is_perishable,standard_order_qty,unit_cost,unit_price,vendor_id
-SKU-0001,Atta 5kg,Staples,N,500,210,245,V-01
-SKU-0002,Paneer 200g,Dairy,Y,300,72,90,V-02
-SKU-0003,Kokum Sherbet 750ml,Beverages,N,200,95,125,V-01
-SKU-0004,Bread 400g,Bakery,Y,400,32,40,V-02
-SKU-0005,Masala Chikki 100g,Snacks,N,150,18,25,V-01

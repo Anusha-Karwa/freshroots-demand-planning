@@ -20,13 +20,12 @@ export const LOAD_ORDER: FileType[] = ["calendar", "skus", "distributors", "week
 
 export const FILE_SPECS: Record<FileType, { description: string; defaultFile: string; fields: FieldSpec[] }> = {
   calendar: {
-    description: "Weeks, months, festival periods (Oct, Nov, Mar) and competitor-scheme events",
+    description: "Months with festival flags (Oct, Nov, Mar) and competitor-scheme events",
     defaultFile: "calendar.csv",
     fields: [
-      { field: "weekStart", type: "date", required: true, aliases: ["week_start", "week_start_date", "week", "week_date", "start_date", "week_beginning"] },
-      { field: "month", type: "int", required: false, aliases: ["month", "month_no", "month_number"], note: "derived from weekStart if absent" },
-      { field: "year", type: "int", required: false, aliases: ["year", "fy", "calendar_year"], note: "derived from weekStart if absent" },
-      { field: "isFestival", type: "bool", required: false, aliases: ["is_festival", "festival_flag", "festival", "is_festival_week", "festival_period"] },
+      { field: "year", type: "int", required: true, aliases: ["year", "calendar_year"] },
+      { field: "month", type: "int", required: true, aliases: ["month", "month_no", "month_number"] },
+      { field: "isFestival", type: "bool", required: false, aliases: ["is_festival_month", "is_festival", "festival_flag", "festival", "festival_month", "festival_period"] },
       { field: "festivalName", type: "string", required: false, aliases: ["festival_name", "festival_event", "event_name", "occasion"] },
       { field: "competitorScheme", type: "string", required: false, aliases: ["competitor_scheme", "competitor_schemes", "competitor_event", "scheme", "competitor_activity"] },
     ],
@@ -39,10 +38,10 @@ export const FILE_SPECS: Record<FileType, { description: string; defaultFile: st
       { field: "name", type: "string", required: true, aliases: ["name", "sku_name", "description", "material_description", "product_name", "item_name"] },
       { field: "category", type: "string", required: false, aliases: ["category", "product_category", "category_name"] },
       { field: "isPerishable", type: "bool", required: true, aliases: ["is_perishable", "perishable", "perishability", "high_perishability", "perishability_flag", "shelf_life_class"], note: "needed for the 3/4-week rule" },
-      { field: "standardOrderQty", type: "int", required: true, aliases: ["standard_order_qty", "standard_order_quantity", "std_order_qty", "moq", "order_qty", "reorder_qty", "eoq"], note: "needed for the 1.5× rule" },
+      { field: "standardOrderQty", type: "int", required: true, aliases: ["standard_order_qty", "standard_order_quantity", "standard_reorder_qty", "standard_reorder_quantity", "std_order_qty", "moq", "order_qty", "reorder_qty", "eoq"], note: "needed for the 1.5× rule" },
       { field: "unitCost", type: "number", required: false, aliases: ["unit_cost", "cost", "cost_price", "purchase_price", "landed_cost"] },
       { field: "unitPrice", type: "number", required: false, aliases: ["unit_price", "price", "selling_price", "mrp", "ptd", "net_price"] },
-      { field: "vendorId", type: "string", required: false, aliases: ["vendor_id", "vendor", "supplier_id", "supplier", "vendor_code"] },
+      { field: "vendorId", type: "string", required: false, aliases: ["vendor_id", "vendor", "supplier_id", "supplier", "vendor_code", "distributor_id"], note: "supplier; one draft PO per vendor" },
       { field: "launchDate", type: "date", required: false, aliases: ["launch_date", "launched_on", "introduced_on", "start_date"] },
       { field: "active", type: "bool", required: false, aliases: ["active", "is_active", "status"] },
     ],
@@ -65,7 +64,7 @@ export const FILE_SPECS: Record<FileType, { description: string; defaultFile: st
     fields: [
       { field: "weekStart", type: "date", required: true, aliases: ["week_start", "week_start_date", "week", "week_date", "week_beginning", "posting_week"] },
       { field: "skuId", type: "string", required: true, aliases: ["sku_id", "sku", "sku_code", "material", "material_code", "item_code"] },
-      { field: "distributorId", type: "string", required: true, aliases: ["distributor_id", "distributor", "distributor_code", "customer", "customer_id", "customer_code", "sold_to"] },
+      { field: "distributorId", type: "string", required: false, aliases: ["distributor_id", "distributor", "distributor_code", "customer", "customer_id", "customer_code", "sold_to"], note: "without it, sales are product-level and rule 6b is off" },
       { field: "units", type: "number", required: true, aliases: ["units", "units_sold", "qty", "quantity", "sales_qty", "sales_units", "billed_qty"] },
       { field: "value", type: "number", required: false, aliases: ["value", "sales_value", "net_value", "revenue", "amount", "sales_inr"] },
     ],
@@ -75,7 +74,7 @@ export const FILE_SPECS: Record<FileType, { description: string; defaultFile: st
     defaultFile: "inventory.csv",
     fields: [
       { field: "skuId", type: "string", required: true, aliases: ["sku_id", "sku", "sku_code", "material", "material_code", "item_code"] },
-      { field: "stockOnHand", type: "number", required: true, aliases: ["stock_on_hand", "stock", "soh", "on_hand", "qty_on_hand", "closing_stock", "unrestricted_stock", "current_stock"] },
+      { field: "stockOnHand", type: "number", required: true, aliases: ["stock_on_hand", "stock", "soh", "on_hand", "units_on_hand", "qty_on_hand", "closing_stock", "unrestricted_stock", "current_stock"] },
       { field: "snapshotDate", type: "date", required: false, aliases: ["snapshot_date", "as_of", "as_of_date", "stock_date", "date"], note: "defaults to the day after the last sales week" },
       { field: "location", type: "string", required: false, aliases: ["location", "warehouse", "plant", "storage_location", "depot"] },
     ],

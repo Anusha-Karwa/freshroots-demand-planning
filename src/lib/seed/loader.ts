@@ -3,8 +3,10 @@ import { Readable } from "node:stream";
 import Papa from "papaparse";
 import { sql, max } from "drizzle-orm";
 import { getDb, schema, type Db } from "@/lib/db";
+import { ALL_DISTRIBUTORS } from "@/lib/db/schema";
+import { getActiveRules } from "@/lib/settings";
 import { FILE_SPECS, LOAD_ORDER, mapColumns, type ColumnMapping, type FileType } from "./columns";
-import { addDays, missingWeeks, parseValue } from "./parse";
+import { addDays, missingWeeks, monthOfWeek, parseNumber, parseValue } from "./parse";
 
 const BATCH = 1000;
 const MAX_STORED_REJECTIONS = 500; // per file; counts are always complete
@@ -43,6 +45,8 @@ export interface LoadOptions {
   source: "seed" | "sap_csv";
   /** seed: wipe master data, sales and stock first. sap_csv: upsert on top of what's there. */
   replace: boolean;
+  /** CSV of sku_id, unit_cost, unit_price used for SKUs whose file has no price (marked 'placeholder'). */
+  placeholderPricesFile?: string;
   /** Manual column mapping per file type (field → header), from the SAP upload mapping step. */
   overrides?: Partial<Record<FileType, Record<string, string>>>;
   log?: (msg: string) => void;
@@ -132,8 +136,10 @@ interface Ctx {
   db: Db;
   skuIds: Set<string>;
   distributorIds: Set<string>;
-  calendarWeeks: Set<string>;
+  calendarMonths: Set<string>; // "YYYY-MM"
   salesWeeks: Set<string>;
+  salesHaveDistributor?: boolean;
+  placeholderPrices: Map<string, { unitCost: number; unitPrice: number }>;
   lastSalesWeek?: string;
   opts: LoadOptions;
 }
@@ -145,17 +151,17 @@ async function insertBatch(ctx: Ctx, type: FileType, rows: Record<string, unknow
   const count = (r: unknown[]) => r.length;
   switch (type) {
     case "calendar": {
-      const t = schema.calendarWeeks;
+      const t = schema.calendarMonths;
       const q = db.insert(t).values(rows as (typeof t.$inferInsert)[]);
       return count(await (upsert
-        ? q.onConflictDoUpdate({ target: t.weekStart, set: { isFestival: sql`excluded.is_festival`, festivalName: sql`excluded.festival_name`, competitorScheme: sql`excluded.competitor_scheme`, month: sql`excluded.month`, year: sql`excluded.year` } })
-        : q.onConflictDoNothing()).returning({ k: t.weekStart }));
+        ? q.onConflictDoUpdate({ target: [t.year, t.month], set: { isFestival: sql`excluded.is_festival`, festivalName: sql`excluded.festival_name`, competitorScheme: sql`excluded.competitor_scheme` } })
+        : q.onConflictDoNothing()).returning({ k: t.month }));
     }
     case "skus": {
       const t = schema.skus;
       const q = db.insert(t).values(rows as (typeof t.$inferInsert)[]);
       return count(await (upsert
-        ? q.onConflictDoUpdate({ target: t.skuId, set: { name: sql`excluded.name`, category: sql`excluded.category`, isPerishable: sql`excluded.is_perishable`, standardOrderQty: sql`excluded.standard_order_qty`, unitCost: sql`excluded.unit_cost`, unitPrice: sql`excluded.unit_price`, vendorId: sql`excluded.vendor_id`, active: sql`excluded.active` } })
+        ? q.onConflictDoUpdate({ target: t.skuId, set: { name: sql`excluded.name`, category: sql`excluded.category`, isPerishable: sql`excluded.is_perishable`, standardOrderQty: sql`excluded.standard_order_qty`, unitCost: sql`excluded.unit_cost`, unitPrice: sql`excluded.unit_price`, priceSource: sql`excluded.price_source`, vendorId: sql`excluded.vendor_id`, active: sql`excluded.active` } })
         : q.onConflictDoNothing()).returning({ k: t.skuId }));
     }
     case "distributors": {
@@ -187,13 +193,12 @@ function handlerFor(type: FileType, ctx: Ctx, loadId: number): RowHandler {
   switch (type) {
     case "calendar":
       return (v, extra) => {
-        const week = v.weekStart as string;
-        const [y, m] = week.split("-").map(Number);
-        ctx.calendarWeeks.add(week);
+        const [year, month] = [v.year as number, v.month as number];
+        if (month < 1 || month > 12) return `month must be 1–12, got ${month}`;
+        ctx.calendarMonths.add(`${year}-${String(month).padStart(2, "0")}`);
         return {
-          weekStart: week,
-          month: (v.month as number | null) ?? m,
-          year: (v.year as number | null) ?? y,
+          year,
+          month,
           isFestival: (v.isFestival as boolean | null) ?? false,
           festivalName: v.festivalName,
           competitorScheme: v.competitorScheme,
@@ -204,7 +209,13 @@ function handlerFor(type: FileType, ctx: Ctx, loadId: number): RowHandler {
       return (v, extra) => {
         if ((v.standardOrderQty as number) <= 0) return "standard order qty must be > 0";
         ctx.skuIds.add(v.skuId as string);
-        return { ...v, active: v.active ?? true, extra };
+        let priceSource: string | null = v.unitCost != null || v.unitPrice != null ? "file" : null;
+        const placeholder = ctx.placeholderPrices.get(v.skuId as string);
+        if (!priceSource && placeholder) {
+          Object.assign(v, placeholder);
+          priceSource = "placeholder";
+        }
+        return { ...v, priceSource, active: v.active ?? true, extra };
       };
     case "distributors":
       return (v, extra) => {
@@ -214,11 +225,13 @@ function handlerFor(type: FileType, ctx: Ctx, loadId: number): RowHandler {
     case "weekly_sales":
       return (v) => {
         if (!ctx.skuIds.has(v.skuId as string)) return `unknown SKU "${v.skuId}"`;
-        if (!ctx.distributorIds.has(v.distributorId as string)) return `unknown distributor "${v.distributorId}"`;
+        const hasDistributor = v.distributorId != null;
+        if (ctx.salesHaveDistributor && !hasDistributor) return "missing distributorId";
+        if (hasDistributor && !ctx.distributorIds.has(v.distributorId as string)) return `unknown distributor "${v.distributorId}"`;
         const week = v.weekStart as string;
-        if (ctx.calendarWeeks.size && !ctx.calendarWeeks.has(week)) return `week ${week} is not in the calendar`;
+        if (ctx.calendarMonths.size && !ctx.calendarMonths.has(monthOfWeek(week))) return `week ${week} falls in ${monthOfWeek(week)}, which is not in the calendar`;
         ctx.salesWeeks.add(week);
-        return { weekStart: week, skuId: v.skuId, distributorId: v.distributorId, units: v.units, value: v.value, loadId };
+        return { weekStart: week, skuId: v.skuId, distributorId: v.distributorId ?? ALL_DISTRIBUTORS, units: v.units, value: v.value, loadId };
       };
     case "inventory":
       return (v) => {
@@ -232,7 +245,7 @@ function handlerFor(type: FileType, ctx: Ctx, loadId: number): RowHandler {
 
 const keyOf = (type: FileType, r: Record<string, unknown>) => {
   switch (type) {
-    case "calendar": return String(r.weekStart);
+    case "calendar": return `${r.year}-${r.month}`;
     case "skus": return String(r.skuId);
     case "distributors": return String(r.distributorId);
     case "weekly_sales": return `${r.weekStart}|${r.skuId}|${r.distributorId}`;
@@ -255,6 +268,11 @@ async function loadOne(ctx: Ctx, type: FileType, src: string): Promise<FileRepor
   if (mapping.missingRequired.length) {
     rep.report.warnings.push(`NOT LOADED — required column(s) missing: ${mapping.missingRequired.join(", ")}`);
     return rep.report;
+  }
+  if (type === "weekly_sales") {
+    ctx.salesHaveDistributor = Boolean(mapping.mapped.distributorId);
+    if (!ctx.salesHaveDistributor)
+      rep.report.warnings.push("No distributor column: sales loaded per product only; rule 6b (distributor concentration) is off.");
   }
 
   const [load] = await db
@@ -327,14 +345,15 @@ export async function rebuildSkuWeekly(db: Db) {
   await db.execute(sql`delete from sku_weekly_sales`);
   await db.execute(sql`
     insert into sku_weekly_sales (week_start, sku_id, units, distributor_count)
-    select week_start, sku_id, sum(units), count(distinct distributor_id)
+    select week_start, sku_id, sum(units),
+           count(distinct distributor_id) filter (where distributor_id <> ${ALL_DISTRIBUTORS})
     from weekly_sales group by week_start, sku_id`);
 }
 
 async function loadIdSets(db: Db, ctx: Ctx) {
   for (const r of await db.select({ id: schema.skus.skuId }).from(schema.skus)) ctx.skuIds.add(r.id);
   for (const r of await db.select({ id: schema.distributors.distributorId }).from(schema.distributors)) ctx.distributorIds.add(r.id);
-  for (const r of await db.select({ w: schema.calendarWeeks.weekStart }).from(schema.calendarWeeks)) ctx.calendarWeeks.add(r.w);
+  for (const r of await db.select().from(schema.calendarMonths)) ctx.calendarMonths.add(`${r.year}-${String(r.month).padStart(2, "0")}`);
 }
 
 async function runChecks(db: Db, ctx: Ctx, reports: FileReport[]): Promise<Check[]> {
@@ -346,18 +365,23 @@ async function runChecks(db: Db, ctx: Ctx, reports: FileReport[]): Promise<Check
     const unknownSku = Object.entries(sales.rejectionsByReason).filter(([k]) => k.startsWith("unknown SKU")).reduce((a, [, n]) => a + n, 0);
     const unknownDist = Object.entries(sales.rejectionsByReason).filter(([k]) => k.startsWith("unknown distributor")).reduce((a, [, n]) => a + n, 0);
     checks.push({ name: "Every sales row's SKU exists in the SKU file", passed: unknownSku === 0, detail: `${unknownSku} row(s) rejected` });
-    checks.push({ name: "Every sales row's distributor exists in the distributor file", passed: unknownDist === 0, detail: `${unknownDist} row(s) rejected` });
+    checks.push(
+      ctx.salesHaveDistributor
+        ? { name: "Every sales row's distributor exists in the distributor file", passed: unknownDist === 0, detail: `${unknownDist} row(s) rejected` }
+        : { name: "Every sales row's distributor exists in the distributor file", passed: true, detail: "n/a — sales have no distributor column (product-level)" },
+    );
+    const offCalendar = Object.entries(sales.rejectionsByReason).filter(([k]) => k.includes("not in the calendar")).reduce((a, [, n]) => a + n, 0);
+    if (ctx.calendarMonths.size)
+      checks.push({ name: "Every sales week falls in a calendar month", passed: offCalendar === 0, detail: `${offCalendar} row(s) rejected` });
 
-    // Missing weeks: across the whole sales range, against a 7-day grid and against the calendar.
+    // Missing weeks: every 7-day step between the first and last sales week, per file and per SKU.
     const weeks = (await db.selectDistinct({ w: schema.weeklySales.weekStart }).from(schema.weeklySales)).map((r) => r.w).sort();
     const gaps = missingWeeks(weeks);
     const first = weeks[0];
     const offGrid = first
       ? weeks.filter((w) => Math.round((Date.parse(w) - Date.parse(first)) / 86_400_000) % 7 !== 0)
       : [];
-    const calInRange = [...ctx.calendarWeeks].filter((w) => w >= weeks[0] && w <= weeks[weeks.length - 1]);
-    const calGaps = calInRange.filter((w) => !weeks.includes(w));
-    const allGaps = [...new Set([...gaps, ...calGaps])].sort();
+    const allGaps = gaps;
     checks.push({
       name: "No missing weeks in sales",
       passed: allGaps.length === 0 && offGrid.length === 0,
@@ -366,6 +390,17 @@ async function runChecks(db: Db, ctx: Ctx, reports: FileReport[]): Promise<Check
           (allGaps.length ? `; missing: ${allGaps.slice(0, 12).join(", ")}${allGaps.length > 12 ? ` (+${allGaps.length - 12} more)` : ""}` : "") +
           (offGrid.length ? `; not on a 7-day grid: ${offGrid.slice(0, 5).join(", ")}` : "")
         : "no sales loaded",
+    });
+    // Per SKU: weeks inside the SKU's own sales range with no row (a gap, not a late launch).
+    const skuGaps = (
+      await db.execute<{ sku_id: string; missing: number }>(sql`
+        select sku_id, ((max(week_start) - min(week_start)) / 7 + 1 - count(*))::int as missing
+        from sku_weekly_sales group by sku_id having (max(week_start) - min(week_start)) / 7 + 1 > count(*)`)
+    ).rows;
+    checks.push({
+      name: "No missing weeks within each SKU's history",
+      passed: skuGaps.length === 0,
+      detail: skuGaps.length ? skuGaps.slice(0, 10).map((r) => `${r.sku_id}: ${r.missing} week(s)`).join(", ") : "all SKUs continuous",
     });
   }
   if (inv) {
@@ -376,18 +411,51 @@ async function runChecks(db: Db, ctx: Ctx, reports: FileReport[]): Promise<Check
       where s.active and not exists (select 1 from inventory_snapshots i where i.sku_id = s.sku_id)`).then((r) => r.rows);
     checks.push({ name: "Every active SKU has a stock figure", passed: n === 0, detail: `${n} active SKU(s) without stock` });
   }
+  if (reports.some((r) => r.type === "calendar") && ctx.calendarMonths.size) {
+    const festive = await db.selectDistinct({ m: schema.calendarMonths.month }).from(schema.calendarMonths).where(sql`${schema.calendarMonths.isFestival}`);
+    const fromCalendar = festive.map((r) => r.m).sort((a, b) => a - b);
+    const fromRules = [...(await getActiveRules()).config.festival.months].sort((a, b) => a - b);
+    checks.push({
+      name: "Calendar festival months match the rules config",
+      passed: fromCalendar.join() === fromRules.join(),
+      detail: `calendar: ${fromCalendar.join(", ") || "none"} · rules: ${fromRules.join(", ")}`,
+    });
+  }
+  if (reports.some((r) => r.type === "skus")) {
+    const rows = (await db.execute<{ src: string | null; n: number }>(sql`select price_source as src, count(*)::int as n from skus group by 1`)).rows;
+    const n = (k: string | null) => rows.find((r) => r.src === k)?.n ?? 0;
+    checks.push({
+      name: "Every SKU has a unit cost/price",
+      passed: n(null) === 0,
+      detail: `${n("file")} from file, ${n("placeholder")} placeholder (₹ figures marked estimated), ${n(null)} missing`,
+    });
+  }
   return checks;
+}
+
+async function readPlaceholderPrices(file?: string) {
+  const map = new Map<string, { unitCost: number; unitPrice: number }>();
+  if (!file || !fs.existsSync(file)) return map;
+  for await (const r of readCsv(file)) {
+    const cost = parseNumber(r.unit_cost ?? "");
+    const price = parseNumber(r.unit_price ?? "");
+    if (r.sku_id && cost.ok && price.ok) map.set(r.sku_id.trim(), { unitCost: cost.value, unitPrice: price.value });
+  }
+  return map;
 }
 
 /** Load any subset of the five files, in dependency order, validating as it goes. */
 export async function loadFiles(files: Partial<Record<FileType, string>>, opts: LoadOptions): Promise<LoadReport> {
   const db = await getDb();
   const log = opts.log ?? (() => {});
-  const ctx: Ctx = { db, skuIds: new Set(), distributorIds: new Set(), calendarWeeks: new Set(), salesWeeks: new Set(), opts };
+  const ctx: Ctx = {
+    db, skuIds: new Set(), distributorIds: new Set(), calendarMonths: new Set(), salesWeeks: new Set(), opts,
+    placeholderPrices: await readPlaceholderPrices(opts.placeholderPricesFile),
+  };
 
   if (opts.replace) {
     log("Clearing master data, sales and stock …");
-    await db.execute(sql`truncate table weekly_sales, sku_weekly_sales, inventory_snapshots, calendar_weeks, distributors, skus, rejected_rows, data_loads restart identity cascade`);
+    await db.execute(sql`truncate table weekly_sales, sku_weekly_sales, inventory_snapshots, calendar_months, distributors, skus, rejected_rows, data_loads restart identity cascade`);
   } else {
     await loadIdSets(db, ctx);
   }

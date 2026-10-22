@@ -11,6 +11,7 @@ import { ensureDefaults } from "../src/lib/settings";
  * npm run seed -- --inspect            show columns found + mapping, load nothing
  * npm run seed -- --dir data/sample    load from another folder
  * npm run seed -- --skus my_skus.csv   override one file's path
+ * npm run seed -- --prices file.csv    placeholder prices for SKUs without cost/price (default data/placeholder_prices.csv)
  */
 const args = process.argv.slice(2);
 const flag = (name: string) => {
@@ -54,7 +55,12 @@ if (inspectOnly) {
 console.log(`Database: ${dbMode()}`);
 const t0 = Date.now();
 await ensureDefaults();
-const report = await loadFiles(files, { source: "seed", replace: true, log: (m) => console.log(m) });
+const report = await loadFiles(files, {
+  source: "seed",
+  replace: true,
+  placeholderPricesFile: flag("prices") ?? "data/placeholder_prices.csv",
+  log: (m) => console.log(m),
+});
 console.log(formatReport(report));
 console.log(`\nDone in ${((Date.now() - t0) / 1000).toFixed(1)}s.`);
 await closeDb();

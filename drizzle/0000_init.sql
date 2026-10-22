@@ -5,14 +5,14 @@ CREATE TABLE "app_settings" (
 	"updated_by" text
 );
 --> statement-breakpoint
-CREATE TABLE "calendar_weeks" (
-	"week_start" date PRIMARY KEY NOT NULL,
-	"month" integer NOT NULL,
+CREATE TABLE "calendar_months" (
 	"year" integer NOT NULL,
+	"month" integer NOT NULL,
 	"is_festival" boolean DEFAULT false NOT NULL,
 	"festival_name" text,
 	"competitor_scheme" text,
-	"extra" jsonb
+	"extra" jsonb,
+	CONSTRAINT "calendar_months_year_month_pk" PRIMARY KEY("year","month")
 );
 --> statement-breakpoint
 CREATE TABLE "daily_tracker" (
@@ -184,6 +184,7 @@ CREATE TABLE "skus" (
 	"standard_order_qty" integer NOT NULL,
 	"unit_cost" numeric(12, 2),
 	"unit_price" numeric(12, 2),
+	"price_source" text,
 	"vendor_id" text,
 	"zoho_item_id" text,
 	"launch_date" date,
@@ -225,6 +226,5 @@ CREATE TABLE "zoho_api_log" (
 --> statement-breakpoint
 ALTER TABLE "inventory_snapshots" ADD CONSTRAINT "inventory_snapshots_sku_id_skus_sku_id_fk" FOREIGN KEY ("sku_id") REFERENCES "public"."skus"("sku_id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "weekly_sales" ADD CONSTRAINT "weekly_sales_sku_id_skus_sku_id_fk" FOREIGN KEY ("sku_id") REFERENCES "public"."skus"("sku_id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "weekly_sales" ADD CONSTRAINT "weekly_sales_distributor_id_distributors_distributor_id_fk" FOREIGN KEY ("distributor_id") REFERENCES "public"."distributors"("distributor_id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 CREATE UNIQUE INDEX "recommendations_run_sku" ON "recommendations" USING btree ("run_id","sku_id");--> statement-breakpoint
 CREATE INDEX "weekly_sales_sku_idx" ON "weekly_sales" USING btree ("sku_id","week_start");

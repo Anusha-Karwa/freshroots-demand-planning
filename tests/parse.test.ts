@@ -10,11 +10,17 @@ describe("parseDate", () => {
     ["12.10.2026", "2026-10-12"],
     ["20261012", "2026-10-12"],
     ["2026-10-12T00:00:00Z", "2026-10-12"],
+    ["2026-W27", "2026-06-29"],
+    ["2026-W42", "2026-10-12"],
+    ["2026W01", "2025-12-29"],
+    ["2020-W53", "2020-12-28"],
   ])("%s → %s", (raw, iso) => expect(parseDate(raw)).toEqual({ ok: true, value: iso }));
 
   it("rejects impossible dates", () => {
     expect(parseDate("31-02-2026").ok).toBe(false);
     expect(parseDate("next monday").ok).toBe(false);
+    expect(parseDate("2025-W53").ok).toBe(false); // 2025 has 52 ISO weeks; 2026 has 53
+    expect(parseDate("2026-W00").ok).toBe(false);
   });
 });
 

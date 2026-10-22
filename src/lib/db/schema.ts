@@ -25,7 +25,8 @@ export const skus = pgTable("skus", {
   standardOrderQty: integer("standard_order_qty").notNull(),
   unitCost: numeric("unit_cost", { precision: 12, scale: 2, mode: "number" }),
   unitPrice: numeric("unit_price", { precision: 12, scale: 2, mode: "number" }),
-  vendorId: text("vendor_id"),
+  priceSource: text("price_source"), // 'file' | 'placeholder' | null (no price) — ₹ figures say "estimated" for placeholder
+  vendorId: text("vendor_id"), // supplier; approved lines are grouped into one draft PO per vendor
   zohoItemId: text("zoho_item_id"),
   launchDate: date("launch_date"),
   active: boolean("active").notNull().default(true),
@@ -42,24 +43,33 @@ export const distributors = pgTable("distributors", {
   extra: jsonb("extra").$type<Record<string, string>>(),
 });
 
-/** One row per week. week_start is the Monday of the week (ISO). */
-export const calendarWeeks = pgTable("calendar_weeks", {
-  weekStart: date("week_start").primaryKey(),
-  month: integer("month").notNull(), // 1–12, month the week is attributed to
-  year: integer("year").notNull(),
-  isFestival: boolean("is_festival").notNull().default(false),
-  festivalName: text("festival_name"),
-  competitorScheme: text("competitor_scheme"), // free text, e.g. "Brand X 10% off atta"
-  extra: jsonb("extra").$type<Record<string, string>>(),
-});
+/** One row per month. A sales week belongs to the month its Thursday falls in (ISO convention). */
+export const calendarMonths = pgTable(
+  "calendar_months",
+  {
+    year: integer("year").notNull(),
+    month: integer("month").notNull(), // 1–12
+    isFestival: boolean("is_festival").notNull().default(false),
+    festivalName: text("festival_name"),
+    competitorScheme: text("competitor_scheme"), // free text, e.g. "Brand X 10% off atta"
+    extra: jsonb("extra").$type<Record<string, string>>(),
+  },
+  (t) => [primaryKey({ columns: [t.year, t.month] })],
+);
 
-/** Weekly sell-in by SKU × distributor. */
+/** Sales rows without distributor detail are stored against this distributor id. */
+export const ALL_DISTRIBUTORS = "ALL";
+
+/**
+ * Weekly sell-in by SKU × distributor. When the file has no distributor column, rows are
+ * SKU-level and distributor_id = ALL_DISTRIBUTORS (the loader validates real ids itself).
+ */
 export const weeklySales = pgTable(
   "weekly_sales",
   {
     weekStart: date("week_start").notNull(),
     skuId: text("sku_id").notNull().references(() => skus.skuId),
-    distributorId: text("distributor_id").notNull().references(() => distributors.distributorId),
+    distributorId: text("distributor_id").notNull(),
     units: numeric("units", { precision: 14, scale: 3, mode: "number" }).notNull(),
     value: numeric("value", { precision: 14, scale: 2, mode: "number" }),
     loadId: integer("load_id"),
@@ -77,7 +87,7 @@ export const skuWeeklySales = pgTable(
     weekStart: date("week_start").notNull(),
     skuId: text("sku_id").notNull(),
     units: numeric("units", { precision: 16, scale: 3, mode: "number" }).notNull(),
-    distributorCount: integer("distributor_count").notNull(),
+    distributorCount: integer("distributor_count").notNull(), // 0 when sales are SKU-level only
   },
   (t) => [primaryKey({ columns: [t.skuId, t.weekStart] })],
 );
