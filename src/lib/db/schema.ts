@@ -118,6 +118,17 @@ export const dataLoads = pgTable("data_loads", {
   summary: jsonb("summary"),
 });
 
+/** SAP CSVs between upload and the mapping step (kept in the DB so it works across serverless instances). */
+export const uploads = pgTable("uploads", {
+  token: text("token").primaryKey(),
+  fileType: text("file_type").notNull(),
+  fileName: text("file_name").notNull(),
+  content: text("content").notNull(),
+  uploadedBy: text("uploaded_by").notNull(),
+  uploadedAt: timestamp("uploaded_at", { withTimezone: true }).notNull().defaultNow(),
+  report: jsonb("report"),
+});
+
 export const rejectedRows = pgTable("rejected_rows", {
   id: serial("id").primaryKey(),
   loadId: integer("load_id").notNull(),

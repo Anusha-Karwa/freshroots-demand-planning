@@ -22,6 +22,13 @@
       "when": 1792674406353,
       "tag": "0002_tracker_week",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1792675470706,
+      "tag": "0003_uploads",
+      "breakpoints": true
     }
   ]
 }

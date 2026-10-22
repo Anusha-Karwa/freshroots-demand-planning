@@ -30,10 +30,12 @@ function create(): Holder {
     const db = drizzlePg(pool, { schema });
     return {
       db,
-      ready: migratePg(db, { migrationsFolder: MIGRATIONS_DIR }),
+      ready: migrateWithLock(pool),
       close: () => pool.end(),
     };
   }
+  if (process.env.VERCEL)
+    throw new Error("DATABASE_URL is not set. Add the Neon connection string in Vercel → Settings → Environment Variables and redeploy.");
   const dir = pgliteDir();
   if (!dir.startsWith("memory://")) fs.mkdirSync(dir, { recursive: true });
   const client = new PGlite(dir);
@@ -43,6 +45,25 @@ function create(): Holder {
     ready: migratePglite(db, { migrationsFolder: MIGRATIONS_DIR }),
     close: () => client.close(),
   };
+}
+
+/**
+ * Several serverless instances can start at once; a Postgres advisory lock makes them apply migrations one at
+ * a time (the others then find nothing to do). A session lock needs one real connection, so this uses Neon's
+ * direct URL (DATABASE_URL_UNPOOLED, set by the Vercel–Neon integration) when present: through the pooled URL
+ * the lock and the migration could land on different server connections.
+ */
+async function migrateWithLock(pool: Pool) {
+  const direct = process.env.DATABASE_URL_UNPOOLED ? new Pool({ connectionString: process.env.DATABASE_URL_UNPOOLED, max: 1 }) : pool;
+  const client = await direct.connect();
+  try {
+    await client.query("select pg_advisory_lock(726200101)");
+    await migratePg(drizzlePg(client, { schema }), { migrationsFolder: MIGRATIONS_DIR });
+  } finally {
+    await client.query("select pg_advisory_unlock(726200101)").catch(() => undefined);
+    client.release();
+    if (direct !== pool) await direct.end();
+  }
 }
 
 /** Returns the database, applying pending migrations on first use. */

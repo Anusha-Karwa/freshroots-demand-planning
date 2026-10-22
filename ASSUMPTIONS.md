@@ -118,6 +118,14 @@ Decisions made without asking. Each one is easy to change; say so if any is wron
 - **The forecast job uses the latest data loaded** (seed or SAP upload). There is no SAP API in scope; the IT
   team uploads the export on the Data page (or a later job can drop it in). Data age is shown everywhere.
 
+## Deployment
+- Uploaded SAP CSVs are kept in the database (`uploads`) between the upload and the mapping step, so the two
+  steps can run on different serverless instances; uploads older than 7 days are removed.
+- Migrations run automatically on first database use, under a Postgres advisory lock taken on Neon's direct
+  connection (`DATABASE_URL_UNPOOLED`), so instances starting together don't race.
+- On Vercel the app refuses to start without `DATABASE_URL` (the local PGlite fallback can't write there).
+- Vercel Hobby runs each cron at most once a day and somewhere within the scheduled hour; both jobs fit that.
+
 ## Product
 - Two extra env vars beyond the prompt's list: `VIEWER_PASSWORD` (read-only login for Deepa/CEO, the
   `viewer` role) and `VIEWER_EMAIL` (where the red kill-switch alert goes).
