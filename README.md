@@ -17,8 +17,8 @@ dashboard; approved lines become **draft** purchase orders in Zoho Inventory, wh
 | Phase | Scope | State |
 |---|---|---|
 | 1 | Scaffold, `.env.example`, DB schema, seed loader, mock adapters, Integrations page; real seed data loaded | ✅ done |
-| 2 | Rules engine + unit tests + backtest page | next |
-| 3 | Dashboard: overview, review queue, exceptions, rules config, SAP CSV upload | |
+| 2 | Rules engine + unit tests + backtest page; `npm run forecast` | ✅ done |
+| 3 | Dashboard: overview, review queue, exceptions, rules config, SAP CSV upload | next |
 | 4 | Gemini explanations, decision log, tracker, kill-switch panel | |
 | 5 | Zoho draft PO flow, Resend emails, cron endpoints | |
 | 6 | Full README, deploy guide, case-requirements mapping | |
@@ -28,6 +28,7 @@ dashboard; approved lines become **draft** purchase orders in Zoho Inventory, wh
 ```bash
 npm install
 npm run seed            # loads data/seed/*.csv
+npm run forecast        # run the rules on the loaded data and save the run
 npm run dev             # http://localhost:3000
 npm test
 ```
@@ -71,6 +72,9 @@ Every external service has a mock mode that switches on automatically when its k
 src/lib/db/schema.ts       all tables (Drizzle); migrations in drizzle/
 src/lib/config/            rules + baseline defaults (editable at runtime, versioned in the DB)
 src/lib/seed/              column mapping, parsing, loader + validation
+src/lib/rules/engine.ts    Raghav's rules — pure functions, no AI (tests/rules.test.ts)
+src/lib/rules/run.ts       data → rules → decision log (forecast_runs, recommendations, exceptions)
+src/lib/rules/backtest.ts  replay past weeks vs what actually sold
 src/lib/adapters/          gemini, zoho, email — live or mock
 src/lib/integrations.ts    live/mock detection
 scripts/                   seed, db-migrate

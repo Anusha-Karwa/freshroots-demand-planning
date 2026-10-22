@@ -58,6 +58,24 @@ Decisions made without asking. Each one is easy to change; say so if any is wron
 - The distributor file includes Karnataka and Gujarat; the case says Maharashtra + Goa. Loaded as supplied.
 
 ## Rules
+- **Festival uplift** multiplies *expected* weekly demand (12-week average × 1.25) when the week being planned
+  falls in a festival month (the month of that week's Thursday). Stock cover is measured against that uplifted
+  demand, so the uplift is applied before the 6/14 and 3/4-week checks. The 20% high-demand test compares two
+  historical averages; uplifting both sides would cancel out, so it is left as is.
+- **Edges are strict**, as worded: "more than 20%", "falls below 6 weeks", "exceeds 14 weeks", "swings > 40%".
+  Exactly 20% / 6 / 14 / 40% does not flag. Comparisons ignore floating-point noise (1000/12 × 1.2 is
+  99.99999999999999 in JavaScript — a test caught this).
+- **Quantities**: high demand → 1.5 × standard order qty; stockout risk alone → 1 × standard qty, flagged
+  "reorder now"; both → 1.5×, now; overstock → pause (0). Raghav can edit any quantity.
+- **High demand + overstock together** is treated as a conflict and sent to Raghav's exceptions queue
+  (demand rising, stock already too high — the rules disagree).
+- **Exceptions are checked first**; an exception SKU gets no recommended quantity. The exception note lists
+  which rule flags it would otherwise have raised.
+- **Zero sales**: no high-demand flag (no baseline); any stock with zero demand is overstock; zero stock and
+  zero sales is no flag. A jump from 0 to any sales counts as a week-on-week swing.
+- **Backtest** (no Raghav history, one stock snapshot): replays high-demand flags against what actually sold
+  next, compares twice-weekly forecasts with the monthly cycle (data 4 weeks older) and values the gap in ₹.
+  Stock flags are replayed automatically once weekly stock snapshots are loaded.
 - Rules and the baseline/kill-switch numbers live in the database (`rules_config_versions`, `app_settings`),
   seeded from `src/lib/config/*.ts` defaults. Nothing is hard-coded in the engine.
 - Kill-switch outcome threshold is stored as ₹11 L/month (as written in the prompt) rather than derived
