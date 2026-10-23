@@ -7,7 +7,7 @@ import { inspectFile } from "@/lib/seed/loader";
 import { getReport, getUpload } from "@/lib/uploads";
 import { Card, Notice, btnCls, btnGhostCls, inputCls } from "@/components/ui";
 import { num } from "@/lib/ui/format";
-import { loadUpload, runForecastNow, uploadCsv } from "../actions";
+import { loadSeedData, loadUpload, runForecastNow, uploadCsv } from "../actions";
 
 export const dynamic = "force-dynamic";
 
@@ -139,6 +139,21 @@ export default async function DataPage({ searchParams }: { searchParams: Promise
         )
       )}
       {(sp.upload || sp.report) && <a href="/data" className={`${btnGhostCls} inline-block`}>Upload another file</a>}
+
+      {canUpload && !sp.upload && !sp.report && (
+        <Card title={s.sales_rows ? "Reload the seed data" : "Start here: load the seed data"}>
+          <form action={loadSeedData} className="flex flex-wrap items-center gap-3 text-sm">
+            <span className="text-stone-600">
+              Loads the five case files shipped with the app (calendar, SKUs, distributors, weekly sales, stock) in the right order and
+              checks them. Replaces any sales, stock and master data already loaded; runs and decisions are kept.
+            </span>
+            <label className="flex items-center gap-2">
+              <input type="checkbox" name="confirm" value="yes" required /> Replace the loaded data
+            </label>
+            <button className={btnCls}>Load the seed data</button>
+          </form>
+        </Card>
+      )}
 
       <Card title="Recent loads">
         <div className="overflow-x-auto">

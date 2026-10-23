@@ -11,6 +11,10 @@ import { getActiveRules } from "@/lib/settings";
 import { rulesConfigSchema, type RulesConfig } from "@/lib/config/rules";
 import { getUpload, isFileType, saveReport, saveUpload } from "@/lib/uploads";
 import { loadFiles } from "@/lib/seed/loader";
+import { FILE_SPECS, LOAD_ORDER } from "@/lib/seed/columns";
+import { ensureDefaults } from "@/lib/settings";
+import fs from "node:fs";
+import path from "node:path";
 import { getDb, schema } from "@/lib/db";
 import { eq } from "drizzle-orm";
 import { TRACKER_ALERT_PCT, updateTracker } from "@/lib/tracker";
@@ -253,5 +257,27 @@ export async function saveVendorMapAction(formData: FormData) {
     for (const [k, v] of formData.entries()) if (k.startsWith("vendor:")) map[k.slice(7)] = String(v);
     await saveVendorMap(map, user);
     return "Saved supplier → Zoho vendor mapping.";
+  });
+}
+
+/** Loads the five seed files shipped with the app (data/seed) — a full replace, like npm run seed. */
+export async function loadSeedData(formData: FormData) {
+  await attempt("/data", async () => {
+    await requirePlanner();
+    if (formData.get("confirm") !== "yes") throw new Error("Tick the box to confirm — this replaces the loaded sales, stock and masters.");
+    const dir = path.join(process.cwd(), "data", "seed");
+    const files = Object.fromEntries(
+      LOAD_ORDER.map((t) => [t, path.join(dir, FILE_SPECS[t].defaultFile)]).filter(([, p]) => fs.existsSync(p)),
+    );
+    if (Object.keys(files).length < LOAD_ORDER.length) throw new Error("Seed files are missing from this deployment.");
+    await ensureDefaults();
+    const r = await loadFiles(files, {
+      source: "seed",
+      replace: true,
+      placeholderPricesFile: path.join(process.cwd(), "data", "placeholder_prices.csv"),
+    });
+    const counts = r.files.map((f) => `${f.type} ${f.accepted}${f.rejected ? ` (${f.rejected} rejected)` : ""}`).join(", ");
+    const failed = r.checks.filter((c) => !c.passed).map((c) => c.name);
+    return `Loaded: ${counts}.${failed.length ? ` Check: ${failed.join("; ")}.` : " All checks passed."} Now run the forecast on the Overview.`;
   });
 }
