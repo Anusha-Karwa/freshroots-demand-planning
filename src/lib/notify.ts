@@ -1,72 +1,65 @@
-import { desc, eq } from "drizzle-orm";
-import { getDb, schema } from "@/lib/db";
+import { inArray } from "drizzle-orm";
+import { schema, type Db } from "@/db";
 import { sendEmail } from "@/lib/adapters/email";
-import type { killSwitch, Status } from "@/lib/killswitch";
-import type { RunSummary } from "@/lib/rules/run";
-import type { CreatedPo } from "@/lib/purchase-orders";
-import { rupees } from "@/lib/ui/format";
+import { appUrl } from "@/lib/integrations";
+import type { KillSwitch } from "@/lib/killswitch";
+import { inr } from "@/lib/format";
 
-const link = (path: string) => `${(process.env.APP_BASE_URL || "http://localhost:3000").replace(/\/$/, "")}${path}`;
+/** The three emails the system sends: Raghav after a run, procurement after POs, Deepa when the kill switch turns red. */
 
-/** After a forecast run: "N items awaiting your call". Skipped when nothing needs Raghav. */
-export async function notifyPlanner(run: RunSummary) {
-  const n = run.counts.flagged + run.counts.exceptions;
-  if (!n) return null;
-  const byFlag = Object.entries(run.counts.byFlag).map(([f, c]) => `${f.replace("_", " ").toLowerCase()}: ${c}`).join(", ");
-  return sendEmail({
-    to: process.env.PLANNER_EMAIL || "Raghav (PLANNER_EMAIL not set)",
-    subject: `${n} item${n === 1 ? "" : "s"} awaiting your call — Freshroots run #${run.runId}`,
+export async function notifyPlanner(db: Db, run: { runId: number; dataThrough: string; counts: Record<string, number> }) {
+  const waiting = (run.counts.review ?? 0) + (run.counts.exceptions ?? 0);
+  if (!waiting) return null;
+  return sendEmail(db, {
+    to: process.env.PLANNER_EMAIL,
+    subject: `${waiting} item${waiting === 1 ? "" : "s"} awaiting your call — demand plan run #${run.runId}`,
     text: [
-      `Raghav,`,
-      ``,
-      `Run #${run.runId} (data as of ${run.dataAsOf}, planning the week of ${run.planningWeek}) flagged ${run.counts.flagged} SKU(s)${byFlag ? ` (${byFlag})` : ""} and sent ${run.counts.exceptions} to your exceptions queue.`,
-      ``,
-      `Review queue: ${link("/review")}`,
-      `Exceptions:   ${link("/exceptions")}`,
-      ``,
-      `Nothing is ordered until you approve it.`,
+      "Hi Raghav,",
+      "",
+      `The demand plan ran on sales data through ${run.dataThrough}.`,
+      `• ${run.counts.review} recommendation(s) to review (${run.counts.stockoutRisk} stockout risk, ${run.counts.highDemand} high demand, ${run.counts.overstockRisk} overstock)`,
+      `• ${run.counts.exceptions} exception(s) that need your judgement`,
+      "",
+      `Review queue: ${appUrl()}/review`,
+      `Exceptions: ${appUrl()}/exceptions`,
+      "",
+      "Nothing is ordered until you approve it.",
     ].join("\n"),
   });
 }
 
-/** After draft POs are created: tell procurement what to confirm in Zoho. */
-export async function notifyProcurement(pos: CreatedPo[], by: string) {
-  const ok = pos.filter((p) => p.status !== "failed");
-  if (!ok.length) return null;
-  return sendEmail({
-    to: process.env.PROCUREMENT_EMAIL || "Procurement (PROCUREMENT_EMAIL not set)",
-    subject: `${ok.length} draft purchase order${ok.length === 1 ? "" : "s"} ready to confirm in Zoho`,
+export async function notifyProcurement(db: Db, poIds: number[]) {
+  const pos = await db.select().from(schema.purchaseOrders).where(inArray(schema.purchaseOrders.id, poIds));
+  if (!pos.length) return null;
+  const isMock = pos.every((p) => p.mode === "mock");
+  return sendEmail(db, {
+    to: process.env.PROCUREMENT_EMAIL,
+    subject: `${pos.length} draft purchase order${pos.length === 1 ? "" : "s"} ready to confirm in Zoho${isMock ? " (MOCK)" : ""}`,
     text: [
-      `Approved by ${by}. Please review and confirm in Zoho Inventory:`,
-      ``,
-      ...ok.map((p) => `• ${p.number} — supplier ${p.supplierId}, ${p.lines} line(s), ${rupees(p.totalValue)}`),
-      ``,
-      `Details: ${link("/purchase-orders")}`,
+      "Hi team,",
+      "",
+      "The demand planner approved these orders. They are drafts in Zoho Inventory — please check and issue them there:",
+      ...pos.map((p) => `• ${p.zohoPoNumber ?? `PO #${p.id}`} — supplier ${p.supplierId}, ${inr(p.total ?? 0)}${p.mode === "mock" ? " [MOCK, not in Zoho]" : ""}`),
+      "",
+      `Details: ${appUrl()}/purchase-orders`,
     ].join("\n"),
   });
 }
 
-/** Emails Deepa when the kill switch turns red (only on the change, not every day it stays red). */
-export async function notifyKillSwitch(k: ReturnType<typeof killSwitch>) {
-  const db = await getDb();
-  const [prev] = await db.select().from(schema.appSettings).where(eq(schema.appSettings.key, "killswitch_last"));
-  const last = (prev?.value as { status?: Status } | undefined)?.status;
-  await db
-    .insert(schema.appSettings)
-    .values({ key: "killswitch_last", value: { status: k.overall }, updatedBy: "tracker" })
-    .onConflictDoUpdate({ target: schema.appSettings.key, set: { value: { status: k.overall }, updatedAt: new Date() } });
-  if (k.overall !== "red" || last === "red") return null;
-  const reason = k.early.status === "red"
-    ? `Raghav edited or rejected ${k.early.ratePct}% of recommendations over the last ${k.early.runsCounted} runs (limit ${k.early.limitPct}%). Action: halt and re-evaluate the rules.`
-    : `Monthly losses were above ${rupees(k.outcome.limit)} for 2 months running (latest ${k.outcome.latest?.month}: ${rupees(k.outcome.latest?.total ?? 0)}). Action: stop, run a root-cause analysis, fix, redeploy.`;
-  return sendEmail({
-    to: process.env.VIEWER_EMAIL || "Deepa (VIEWER_EMAIL not set)",
-    subject: "Freshroots demand planning: kill switch is RED",
-    text: `Deepa,\n\n${reason}\n\nTracker: ${link("/tracker")}`,
+export async function notifyKillSwitchRed(db: Db, ks: KillSwitch) {
+  return sendEmail(db, {
+    to: process.env.VIEWER_EMAIL,
+    subject: "Demand planning kill switch is RED",
+    text: [
+      "Hi Deepa,",
+      "",
+      "The demand-planning system hit a kill criterion:",
+      ...ks.messages.map((m) => `• ${m}`),
+      "",
+      ks.early.status === "red" ? "Early kill switch: halt and re-evaluate the rules with Raghav." : "",
+      ks.outcome.status === "red" ? "Outcome kill switch: stop, run a root-cause analysis, fix, redeploy." : "",
+      "",
+      `Dashboard: ${appUrl()}/`,
+    ].filter((l, i, a) => l || a[i - 1]).join("\n"),
   });
-}
-
-export async function recentEmails(limit = 15) {
-  const db = await getDb();
-  return db.select().from(schema.mockEmails).orderBy(desc(schema.mockEmails.id)).limit(limit);
 }

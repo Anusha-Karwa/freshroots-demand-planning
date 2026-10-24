@@ -1,53 +1,33 @@
 import { redirect } from "next/navigation";
-import { authEnabled, roleForPassword, setSession, clearSession } from "@/lib/auth";
+import { connection } from "next/server";
+import { authEnabled } from "@/lib/auth/session";
+import { param, type SearchParams } from "@/lib/page";
+import { login } from "../actions";
 
-export const dynamic = "force-dynamic";
-
-async function login(formData: FormData) {
-  "use server";
-  const name = String(formData.get("name") ?? "").trim();
-  const role = roleForPassword(String(formData.get("password") ?? ""));
-  if (!role || !name) redirect("/login?error=1");
-  await setSession({ name, role });
-  redirect("/");
-}
-
-async function logout() {
-  "use server";
-  await clearSession();
-  redirect("/login");
-}
-
-export default async function LoginPage({ searchParams }: { searchParams: Promise<{ error?: string; out?: string }> }) {
+export default async function LoginPage({ searchParams }: { searchParams: SearchParams }) {
+  await connection(); // passwords are read at request time, not baked in at build
+  if (!authEnabled()) redirect("/");
   const sp = await searchParams;
-  if (!authEnabled()) {
-    return (
-      <p className="text-sm text-stone-600">
-        Login is off in local dev (no <code>DASHBOARD_PASSWORD</code> set) — you are the planner.
-      </p>
-    );
-  }
-  if (sp.out) {
-    return (
-      <form action={logout}>
-        <button className="rounded bg-stone-800 px-3 py-1.5 text-sm text-white">Sign out</button>
-      </form>
-    );
-  }
+  const err = param(sp.err);
   return (
-    <form action={login} className="mx-auto mt-10 max-w-sm space-y-3 rounded border border-stone-200 bg-white p-6">
-      <h1 className="text-lg font-semibold">Sign in</h1>
-      <label className="block text-sm">
-        Your name
-        <input name="name" required placeholder="e.g. Raghav" className="mt-1 w-full rounded border border-stone-300 px-2 py-1.5" />
-      </label>
-      <label className="block text-sm">
-        Password
-        <input name="password" type="password" required className="mt-1 w-full rounded border border-stone-300 px-2 py-1.5" />
-      </label>
-      {sp.error && <p className="text-sm text-red-700">Name and a valid password are required.</p>}
-      <button className="w-full rounded bg-emerald-700 px-3 py-2 text-sm font-medium text-white">Sign in</button>
-      <p className="text-xs text-stone-500">Planner password: decide and edit rules. Viewer password: read-only.</p>
-    </form>
+    <main className="flex min-h-screen items-center justify-center p-4">
+      <form action={login} className="w-full max-w-sm space-y-4 rounded-lg border border-[var(--border)] bg-[var(--surface)] p-6">
+        <div>
+          <h1 className="text-lg font-semibold">Freshroots demand planning</h1>
+          <p className="text-[var(--text-2)]">Planner password to decide; viewer password for read-only.</p>
+        </div>
+        {err && <div role="alert" className="rounded-md bg-[var(--bad-bg)] px-3 py-2 text-[var(--bad)]">{err}</div>}
+        <input type="hidden" name="next" value={param(sp.next) ?? "/"} />
+        <label className="block">
+          <span className="mb-1 block text-sm text-[var(--text-2)]">Your name (recorded with every decision)</span>
+          <input name="name" required autoComplete="name" className="w-full" />
+        </label>
+        <label className="block">
+          <span className="mb-1 block text-sm text-[var(--text-2)]">Password</span>
+          <input name="password" type="password" required autoComplete="current-password" className="w-full" />
+        </label>
+        <button className="w-full rounded-md bg-[var(--accent)] px-3 py-2 font-medium text-[var(--accent-ink)]">Sign in</button>
+      </form>
+    </main>
   );
 }

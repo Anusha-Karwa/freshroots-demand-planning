@@ -1,144 +1,93 @@
 # Assumptions
 
-Decisions made without asking. Each one is easy to change; say so if any is wrong.
+Decisions made without asking. Each one is easy to change.
 
-## Source documents
-- The case (`docs/MESA_Case_01_-_22_Oct.pdf`) and the components map (`docs/Freshroots_Components_Map_v2.png`)
-  are in `docs/`. The build follows the map's lanes: Vercel Cron → SAP + demand data → cleaning into Postgres →
-  rules config → rules engine (no AI) → Gemini reasons + exceptions → Raghav's final call → Zoho draft PO +
-  Resend email → procurement confirms in Zoho; every decision is logged and feeds the daily tracker / kill switch.
-- The case mentions "the 9 checks" and "the Pre-Build Decision Checklist" but does not list them; the README's
-  requirements mapping (phase 6) will use the course's list once provided.
-- The case's "unusual distributor behaviour, new launches, one-off market events" (the 15–20% Raghav handles on
-  judgement) map to the three exception rules: new SKU (< 12 weeks), single-distributor concentration, and
-  week-on-week swings > 40%.
-- The map puts the **perishable list** in the rules config, so the Rules page (phase 3) will let Raghav change a
-  SKU's perishability as a versioned rules change, on top of the flag from the SKU file.
-- The map has Gemini "route odd cases to exceptions". Routing stays rule-based so it is predictable; Gemini can
-  additionally mark a rule-covered flag as "looks unusual", which moves it to the exceptions queue for Raghav.
-  It never changes a quantity.
-- The case says SAP holds three years of distributor-level sales; the seed data supplied is 16 weeks at SKU
-  level. The loader handles both.
-
-- **Seed data** is in `data/seed/` (15 SKUs, 4 distributors, 16 weeks: ISO weeks 2026-W27 → W42, stock as of
-  19 Oct 2026). It is synthetic and small, so it is committed. The earlier placeholder sample was deleted.
-
-## Data & database
-- **Local database without `DATABASE_URL` is PGlite** (real Postgres compiled to WASM, stored in `./.data/pglite`)
-  rather than SQLite. Same SQL dialect as Neon/Supabase in production, one schema, one set of migrations,
-  no Docker. Limitation: only one process can open it at a time — stop `npm run dev` before `npm run seed`.
-- **ORM is Drizzle** (the prompt allowed Prisma or Drizzle). Drizzle supports both PGlite and node-postgres
-  from one schema; Prisma would need separate SQLite/Postgres schemas.
-- **Seed files are CSV** with a header row. Excel files should be saved as CSV first.
-- **A week is identified by its Monday.** ISO week labels (`2026-W27`) are converted to that Monday.
-  "No missing weeks" means every 7-day step between the first and last sales week has rows, overall and
-  within each SKU's own history.
-- **The calendar is monthly** (as supplied). A sales week belongs to the month its Thursday falls in (ISO
-  convention, so a week is never split across months). Sales weeks outside the calendar are rejected.
-- **Festival months**: the rules config (editable, versioned) is what the engine uses; the seed loader checks
-  that the calendar's festival months agree with it (both are Mar, Oct, Nov today).
-- **Sales/stock quantities are decimals** (numeric), since SAP exports can carry kg/litre units.
-- **Negative sales units are accepted** (returns/credit notes); only negative *stock* is rejected, as the prompt asks.
-- **Duplicate rows** (same week × SKU × distributor) — the last one in the file wins; duplicates are counted
-  in the summary.
-- **Inventory without a date column** is treated as a snapshot taken the day after the last sales week.
-- **`npm run seed` is a full reload**: it clears master data, sales and stock first (run history,
-  decisions and POs are kept). The SAP CSV upload (phase 3) upserts on top instead.
-- **SKU rows with standard order qty ≤ 0 are rejected**, since the 1.5× rule needs a positive quantity.
-- **Sales have no distributor column** (confirmed with Anusha). Sales are stored per SKU (distributor `ALL`),
-  and rule 6b — "a single distributor drives > 40% of the week-on-week change" — is **off** until a sales file
-  with a distributor column is loaded; it then switches on automatically.
-- **`Distributor_ID` on the SKU file is the SKU's supplier** (confirmed). Approved lines are grouped into one
-  draft PO per supplier; each supplier is mapped to a Zoho vendor in phase 5.
-- **Prices are placeholders** (confirmed). The SKU file has no cost/price, so `data/placeholder_prices.csv`
-  supplies a made-up cost and price per SKU. Those SKUs are marked `price_source = placeholder` and every ₹
-  figure built on them is labelled *estimated*. Adding `Unit_Cost` / `Unit_Price` columns to the SKU file
-  replaces them.
-- **Short history**: 16 weeks with a 12-week average leaves about 4 historical runs to backtest, not 6–12 months.
-- The distributor file includes Karnataka and Gujarat; the case says Maharashtra + Goa. Loaded as supplied.
+## Data
+- **Seed data** (`data/seed/`): 15 SKUs, 4 distributors, 16 weeks of sales (ISO 2026-W27 → W42), one stock snapshot
+  dated 19 Oct 2026, a 2025–2026 monthly calendar. Synthetic, so it is committed.
+- **Sales have no distributor column.** They are stored per SKU (distributor `ALL`), so the single-distributor
+  exception (rule 6b) is off. It switches on by itself once a sales file with distributors is loaded.
+- **The SKU file's `Distributor_ID` is the supplier** the SKU is bought from (confirmed earlier). POs are grouped by it.
+- **Prices are placeholders** (`data/placeholder_prices.csv`): the SKU file has no cost/price. Those SKUs are marked
+  `price_source = placeholder` and the ₹ figures built on them say "estimated". Real prices never get overwritten
+  by placeholders.
+- **A week is its Monday.** A week belongs to the month its Thursday falls in.
+- **Duplicate sales rows** (same week × SKU × distributor) are added up, since SAP exports are often per billing line.
+- **Missing weeks** are reported as warnings and read as zero sales; they don't block a load.
+- **Seed load** replaces sales and stock and upserts masters (SKUs not in the file become inactive). **SAP uploads**
+  add to / update the data: a sales file replaces the week × SKU combinations it contains.
+- **Local database without `DATABASE_URL`** is PGlite (real Postgres in WASM): same SQL as Neon, no Docker.
 
 ## Rules
-- **Festival uplift** multiplies *expected* weekly demand (12-week average × 1.25) when the week being planned
-  falls in a festival month (the month of that week's Thursday). Stock cover is measured against that uplifted
-  demand, so the uplift is applied before the 6/14 and 3/4-week checks. The 20% high-demand test compares two
-  historical averages; uplifting both sides would cancel out, so it is left as is.
-- **Edges are strict**, as worded: "more than 20%", "falls below 6 weeks", "exceeds 14 weeks", "swings > 40%".
-  Exactly 20% / 6 / 14 / 40% does not flag. Comparisons ignore floating-point noise (1000/12 × 1.2 is
-  99.99999999999999 in JavaScript — a test caught this).
-- **Quantities**: high demand → 1.5 × standard order qty; stockout risk alone → 1 × standard qty, flagged
-  "reorder now"; both → 1.5×, now; overstock → pause (0). Raghav can edit any quantity.
-- **High demand + overstock together** is treated as a conflict and sent to Raghav's exceptions queue
-  (demand rising, stock already too high — the rules disagree).
-- **Exceptions are checked first**; an exception SKU gets no recommended quantity. The exception note lists
-  which rule flags it would otherwise have raised.
-- **Zero sales**: no high-demand flag (no baseline); any stock with zero demand is overstock; zero stock and
-  zero sales is no flag. A jump from 0 to any sales counts as a week-on-week swing.
-- **Backtest** (no Raghav history, one stock snapshot): replays high-demand flags against what actually sold
-  next, compares twice-weekly forecasts with the monthly cycle (data 4 weeks older) and values the gap in ₹.
-  Stock flags are replayed automatically once weekly stock snapshots are loaded.
-- Rules and the baseline/kill-switch numbers live in the database (`rules_config_versions`, `app_settings`),
-  seeded from `src/lib/config/*.ts` defaults. Nothing is hard-coded in the engine.
-- Kill-switch outcome threshold is stored as ₹11 L/month (as written in the prompt) rather than derived
-  from ₹34 L ÷ 3 = ₹11.3 L.
+- **Festival uplift** multiplies expected weekly demand (12-week average × 1.25) when the **planning date** (the run
+  date, IST) is in a festival month. Stock cover is measured against the uplifted demand, so the uplift comes before
+  the 6/14 and 3/4-week checks. The high-demand test compares two historical averages and is not uplifted.
+- **Festival months** come from the rules config (editable); the calendar file is context for Gemini.
+- **Strict edges**, as worded: "more than 20%", "falls below 6 weeks", "exceeds 14 weeks", "swings > 40%". Exactly
+  on a threshold does not flag. Comparisons ignore floating-point noise.
+- **Quantities**: high demand → 1.5 × standard; stockout risk → 1 × standard, "reorder now"; both → 1.5×, now;
+  overstock → pause (0). The review page also shows how many units would reach the minimum cover.
+- **Exceptions are not auto-recommended**: no recommended quantity; the rules' view (flags and quantity) is shown
+  for reference, and Raghav sets the quantity.
+- Extra exception cases: **high demand + overstock together** (the rules disagree) and **no stock figure**.
+- **Distributor concentration** ignores tiny changes: only checked when the week-on-week change is at least 10% of
+  the previous week (editable; set 0 to apply the rule literally). Otherwise, with few distributors, noise would
+  trigger it all the time.
+- **Zero sales**: no high-demand flag; any stock with no demand is overstock; zero stock + zero sales flags nothing.
+  A jump from 0 to any sales is a week-on-week swing.
+- Every rules change needs a note and is a new version; runs record which version they used.
 
 ## AI (Gemini)
-- One Gemini call per flag returns JSON `{reason, unusual, unusualWhy}`, validated before use. There is no
-  quantity field; anything malformed, slow or failing falls back to the template reason. Calls run 5 at a time.
-- "Routes unusual cases to exceptions": rule-based exceptions are routed first; Gemini can additionally move a
-  rule flag to the exceptions queue (type "Looks unusual (AI)") with its reason. Raghav still decides; the rule
-  flags are shown with it. In mock mode nothing is AI-routed.
+- Gemini gets the engine's numbers and returns, per flagged SKU, a ≤ 2-sentence reason and an "unusual?" flag
+  with a note. Batches of 12, 3 in parallel. Its JSON schema has no quantity field; a reason that mentions an
+  order quantity is dropped.
+- **Routing**: rule exceptions are routed by the rules. Gemini may additionally move a rule-covered flag to the
+  exceptions queue ("Looks unusual (AI)"). The quantity is then removed and Raghav decides. In mock mode nothing
+  is AI-routed.
+- Default model `gemini-flash-latest` (override with `GEMINI_MODEL`). Thinking is kept low so it doesn't eat the
+  output budget; any failure falls back to the template reason and is noted on the run.
+
+## Decisions & orders
+- Decisions are made on the **latest run only**; a line can be changed until it is on a PO.
+- Editing to the recommended quantity counts as an approval. Exceptions approved with Raghav's quantity count as
+  approvals, and they are not part of the override rate (there is no rule recommendation to override).
+- **Only the latest run's approved lines with qty > 0** are ordered; lines are claimed before the Zoho call, so a
+  double click can't order twice. A failed PO keeps its lines and can be retried.
+- **One draft PO per supplier**; unmapped suppliers use `ZOHO_DEFAULT_VENDOR_ID` (live) or a mock vendor (mock).
+  PO rates are unit costs.
+- In mock mode, "Simulate procurement confirm" stands in for procurement issuing the draft in Zoho.
 
 ## Measurement
-- **Daily early warning** compares the latest week's actual units with the forecast for that week — the one a
-  run saved, or (for history no run planned) the rules re-run on the weeks before it. SAP sales arrive weekly,
-  so the daily job's numbers change when a new week is loaded. More than 25% off forecast is flagged.
-- **Stockout incidents** are detected when a SKU that sold last week has 0 stock; the estimate is one week of
-  forecast demand at unit price. Planners can also add incidents by hand.
-- **Monthly ₹ losses** (primary metric) are entered by hand from finance's numbers, as the brief allows.
-- **Kill switch**: early = edited + rejected ÷ decided recommendations over the last 4 runs that had
-  decisions (red > 50%, amber > 35%); outcome = total monthly loss > ₹11 L for the 2 latest months (red), latest
-  month alone (amber). Overall = the worse of the two; grey = not enough data.
+- **Daily early warning**: SAP sales arrive weekly, so the daily job compares the latest loaded week's actual units
+  with the forecast for that week. The forecast is taken from the last run made before that week's data, or, if
+  none exists, from the rules re-run on the weeks before it. Beyond ±25% is flagged (editable).
+- **Stockout incidents**: logged automatically when a SKU with demand shows 0 stock, valued at one week of forecast
+  × unit price; manual incidents can be added.
+- **Monthly ₹ losses** (primary metric) are entered from finance's numbers on the Tracker.
+- **Kill switch**: early = (edited + rejected) ÷ decided review recommendations over the last 4 runs with decisions;
+  red > 50%, amber > 35%. Outcome = red when the latest 2 consecutive months are each > ₹11 L; amber when the latest
+  month is. Overall = the worse; grey = not enough data. Deepa is emailed when it *turns* red.
 - **Payback** = ₹15 L ÷ (baseline midpoint ₹10.33 L/month − average loss of the last up to 3 months).
-- **Data age at decision** = days from the last day of sales data in the run to Raghav's decision.
+- **Data age** = days from the last day of sales data to today / the decision / the PO.
 
-## Orders, emails, schedule
-- **Only the latest run's approved lines** go on purchase orders, so an older approval can't double-order a
-  SKU. Approved "pause" lines (qty 0) and rejected lines are not ordered. Ordered exceptions use Raghav's qty.
-- **One draft PO per supplier** (the SKU file's Distributor_ID). Each supplier maps to a Zoho vendor id on the
-  Purchase orders page; unmapped suppliers go to `ZOHO_DEFAULT_VENDOR_ID`. PO rates are unit costs (placeholder
-  for now, and the PO notes say so).
-- POs are only ever created as Zoho **drafts**; procurement confirms in Zoho, and the daily job syncs the status
-  back. In mock mode a "simulate procurement confirming" link stands in for that.
-- A Zoho failure for one supplier doesn't stop the others; the failed PO keeps its lines and can be retried.
-- The live Zoho client (token refresh + cache, 429/5xx retries, 401 re-auth, API log) is tested against a fake
-  Zoho server only — Zoho sign-up was blocked, so it has not run against the real API yet.
-- **Emails**: planner after each scheduled run (skipped when nothing is flagged), procurement after POs are
-  created, Deepa when the kill switch *turns* red (not every day it stays red). With an address unset, mock mode
-  still logs the email (to "… not set"); live mode skips it.
-- **The forecast job uses the latest data loaded** (seed or SAP upload). There is no SAP API in scope; the IT
-  team uploads the export on the Data page (or a later job can drop it in). Data age is shown everywhere.
-
-## Deployment
-- Uploaded SAP CSVs are kept in the database (`uploads`) between the upload and the mapping step, so the two
-  steps can run on different serverless instances; uploads older than 7 days are removed.
-- Migrations run automatically on first database use, under a Postgres advisory lock taken on Neon's direct
-  connection (`DATABASE_URL_UNPOOLED`), so instances starting together don't race.
-- On Vercel the app refuses to start without `DATABASE_URL` (the local PGlite fallback can't write there).
-- Vercel Hobby runs each cron at most once a day and somewhere within the scheduled hour; both jobs fit that.
+## Backtest
+- With no history of Raghav's calls, the backtest replays the high-demand rule week by week and checks whether
+  demand stayed > 20% up over the next 4 weeks. It also compares the twice-weekly forecast (fresh data) with the
+  monthly cycle (data 4 weeks older), costing under-forecast at price and over-forecast at cost.
+- With one stock snapshot, stock flags can't be replayed for past weeks; uploading weekly stock snapshots enables it.
+- Uploading Raghav's past flags (Data page) adds the agreement score (target ≥ 85%).
+- 16 weeks of data with a 12-week window leaves 4 replay weeks, not 6–12 months.
+- On the seed data, fresh vs month-old data makes almost no difference (demand is flat except SKU001's step up),
+  and the result is reported as is.
 
 ## Product
-- Two extra env vars beyond the prompt's list: `VIEWER_PASSWORD` (read-only login for Deepa/CEO, the
-  `viewer` role) and `VIEWER_EMAIL` (where the red kill-switch alert goes).
-- With no `DASHBOARD_PASSWORD`, local dev skips login and treats everyone as the planner.
-- Login is a shared password per role; each person types their name at sign-in, and that name is what the
-  decision log and rules history record. Fine for an MVP with two roles; swap for real accounts later.
-- "Bulk approve for stockout risk only after viewing" = the bulk form lists every stockout line with its
-  numbers, each line can be unticked, and a required "I have reviewed these lines" box must be ticked.
-- Decisions can be changed until the line is on a purchase order. Editing to the recommended quantity counts as
-  an approval (the reason is still kept).
-- SAP uploads add to / update existing data (seed loads replace it). If a SKU-week has both SKU-level and
-  distributor-level rows, the distributor detail is kept. A load check warns when the newest week covers only
-  some SKUs, since missing SKUs would read as zero sales.
-- Zoho is skipped for now (account sign-up was blocked on Zoho's side): purchase orders stay in mock mode.
-- Vercel Cron schedules are in UTC: forecast `30 0 * * 1,4` (Mon + Thu 06:00 IST), tracker `30 1 * * *`
-  (07:00 IST daily).
+- Two roles via shared passwords: `DASHBOARD_PASSWORD` (planner) and `VIEWER_PASSWORD` (viewer). Each person types
+  their name at sign-in, and that name goes in the decision log and the rules history. Without
+  `DASHBOARD_PASSWORD` (local dev) there is no login.
+- Extra env vars beyond the brief: `VIEWER_PASSWORD`, `VIEWER_EMAIL` (Deepa's alert), `AUTH_SECRET`,
+  `APP_BASE_URL`, `DATABASE_URL_UNPOOLED`.
+- Uploaded CSVs wait in the database between upload and column mapping (serverless instances share nothing else)
+  and are deleted after 7 days. Excel files must be saved as CSV first.
+- The distributor file includes Karnataka and Gujarat although the case says Maharashtra + Goa; loaded as supplied.
+- The case's "9 checks" are not listed in the case or the brief, so the README maps the build to the 5 pre-build
+  decisions and the case facts, and leaves a place for the 9 checks.

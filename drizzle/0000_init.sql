@@ -1,96 +1,71 @@
-CREATE TABLE "app_settings" (
-	"key" text PRIMARY KEY NOT NULL,
-	"value" jsonb NOT NULL,
-	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
-	"updated_by" text
-);
---> statement-breakpoint
 CREATE TABLE "calendar_months" (
-	"year" integer NOT NULL,
-	"month" integer NOT NULL,
+	"year_month" text PRIMARY KEY NOT NULL,
 	"is_festival" boolean DEFAULT false NOT NULL,
 	"festival_name" text,
-	"competitor_scheme" text,
-	"extra" jsonb,
-	CONSTRAINT "calendar_months_year_month_pk" PRIMARY KEY("year","month")
-);
---> statement-breakpoint
-CREATE TABLE "daily_tracker" (
-	"date" date NOT NULL,
-	"sku_id" text NOT NULL,
-	"forecast_units" numeric(14, 2) NOT NULL,
-	"actual_units" numeric(14, 2) NOT NULL,
-	"stock_on_hand" numeric(14, 3),
-	"deviation_pct" numeric(8, 2),
-	CONSTRAINT "daily_tracker_date_sku_id_pk" PRIMARY KEY("date","sku_id")
+	"competitor_scheme" text
 );
 --> statement-breakpoint
 CREATE TABLE "data_loads" (
 	"id" serial PRIMARY KEY NOT NULL,
 	"source" text NOT NULL,
-	"file_name" text NOT NULL,
-	"file_type" text NOT NULL,
-	"loaded_at" timestamp with time zone DEFAULT now() NOT NULL,
-	"data_as_of" date,
-	"rows_accepted" integer DEFAULT 0 NOT NULL,
-	"rows_rejected" integer DEFAULT 0 NOT NULL,
-	"summary" jsonb
+	"kind" text NOT NULL,
+	"filename" text,
+	"accepted" integer NOT NULL,
+	"rejected" integer NOT NULL,
+	"summary" jsonb,
+	"loaded_by" text NOT NULL,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
-CREATE TABLE "distributor_complaints" (
+CREATE TABLE "decision_log" (
 	"id" serial PRIMARY KEY NOT NULL,
-	"date" date NOT NULL,
-	"distributor_id" text,
-	"sku_id" text,
-	"note" text NOT NULL,
-	"entered_by" text
+	"run_item_id" integer NOT NULL,
+	"run_id" integer NOT NULL,
+	"sku_id" text NOT NULL,
+	"decision" text NOT NULL,
+	"recommended_qty" numeric,
+	"final_qty" numeric,
+	"reason" text,
+	"decided_by" text NOT NULL,
+	"data_age_days" integer,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
 CREATE TABLE "distributors" (
-	"distributor_id" text PRIMARY KEY NOT NULL,
+	"id" text PRIMARY KEY NOT NULL,
 	"name" text NOT NULL,
-	"district" text,
 	"region" text,
-	"state" text,
-	"active" boolean DEFAULT true NOT NULL,
-	"extra" jsonb
+	"status" text
 );
 --> statement-breakpoint
-CREATE TABLE "exceptions" (
+CREATE TABLE "email_log" (
 	"id" serial PRIMARY KEY NOT NULL,
-	"run_id" integer NOT NULL,
-	"sku_id" text NOT NULL,
-	"types" jsonb NOT NULL,
-	"metrics" jsonb NOT NULL,
-	"ai_note" text,
-	"ai_note_source" text,
-	"status" text DEFAULT 'open' NOT NULL,
-	"planner_qty" integer,
-	"planner_note" text,
-	"decided_by" text,
-	"decided_at" timestamp with time zone,
-	"purchase_order_id" integer
+	"mode" text NOT NULL,
+	"to" text NOT NULL,
+	"subject" text NOT NULL,
+	"status" text NOT NULL,
+	"detail" text,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
-CREATE TABLE "forecast_runs" (
+CREATE TABLE "kill_switch_history" (
+	"check_date" date PRIMARY KEY NOT NULL,
+	"overall" text NOT NULL,
+	"early" text NOT NULL,
+	"outcome" text NOT NULL,
+	"detail" jsonb
+);
+--> statement-breakpoint
+CREATE TABLE "market_events" (
 	"id" serial PRIMARY KEY NOT NULL,
-	"trigger" text NOT NULL,
-	"started_at" timestamp with time zone DEFAULT now() NOT NULL,
-	"finished_at" timestamp with time zone,
-	"status" text DEFAULT 'running' NOT NULL,
-	"data_as_of" date,
-	"rules_version" integer,
-	"counts" jsonb,
-	"error" text
-);
---> statement-breakpoint
-CREATE TABLE "inventory_snapshots" (
-	"snapshot_date" date NOT NULL,
-	"sku_id" text NOT NULL,
-	"location" text DEFAULT 'ALL' NOT NULL,
-	"stock_on_hand" numeric(14, 3) NOT NULL,
-	"load_id" integer,
-	CONSTRAINT "inventory_snapshots_snapshot_date_sku_id_location_pk" PRIMARY KEY("snapshot_date","sku_id","location")
+	"kind" text NOT NULL,
+	"description" text NOT NULL,
+	"start_date" date NOT NULL,
+	"end_date" date NOT NULL,
+	"sku_id" text,
+	"category" text,
+	"created_by" text NOT NULL,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
 CREATE TABLE "mock_emails" (
@@ -103,128 +78,178 @@ CREATE TABLE "mock_emails" (
 --> statement-breakpoint
 CREATE TABLE "mock_zoho_purchase_orders" (
 	"id" serial PRIMARY KEY NOT NULL,
-	"purchaseorder_number" text NOT NULL,
-	"payload" jsonb NOT NULL,
+	"po_number" text NOT NULL,
 	"status" text DEFAULT 'draft' NOT NULL,
+	"payload" jsonb NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
 CREATE TABLE "monthly_losses" (
-	"month" text PRIMARY KEY NOT NULL,
-	"stockout_loss" numeric(14, 2) NOT NULL,
-	"overstock_writeoff" numeric(14, 2) NOT NULL,
-	"notes" text,
-	"entered_by" text,
-	"entered_at" timestamp with time zone DEFAULT now() NOT NULL
+	"year_month" text PRIMARY KEY NOT NULL,
+	"stockout_loss" numeric NOT NULL,
+	"overstock_writeoff" numeric NOT NULL,
+	"distributor_complaints" integer,
+	"note" text,
+	"entered_by" text NOT NULL,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL
+);
+--> statement-breakpoint
+CREATE TABLE "planner_history" (
+	"week_start" date NOT NULL,
+	"sku_id" text NOT NULL,
+	"flag" text NOT NULL,
+	CONSTRAINT "planner_history_week_start_sku_id_flag_pk" PRIMARY KEY("week_start","sku_id","flag")
+);
+--> statement-breakpoint
+CREATE TABLE "po_lines" (
+	"id" serial PRIMARY KEY NOT NULL,
+	"po_id" integer NOT NULL,
+	"run_item_id" integer NOT NULL,
+	"sku_id" text NOT NULL,
+	"qty" numeric NOT NULL,
+	"rate" numeric
 );
 --> statement-breakpoint
 CREATE TABLE "purchase_orders" (
 	"id" serial PRIMARY KEY NOT NULL,
-	"vendor_id" text NOT NULL,
+	"run_id" integer NOT NULL,
+	"supplier_id" text NOT NULL,
+	"zoho_vendor_id" text,
 	"mode" text NOT NULL,
-	"status" text DEFAULT 'pending_push' NOT NULL,
-	"zoho_purchaseorder_id" text,
-	"zoho_purchaseorder_number" text,
-	"lines" jsonb NOT NULL,
-	"total_value" numeric(14, 2),
-	"data_as_of" date,
-	"created_by" text,
-	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
-	"error" text
+	"status" text NOT NULL,
+	"zoho_po_id" text,
+	"zoho_po_number" text,
+	"total" numeric,
+	"data_age_days" integer,
+	"error" text,
+	"created_by" text NOT NULL,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
-CREATE TABLE "recommendations" (
+CREATE TABLE "rules_versions" (
+	"id" serial PRIMARY KEY NOT NULL,
+	"config" jsonb NOT NULL,
+	"note" text,
+	"created_by" text NOT NULL,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL
+);
+--> statement-breakpoint
+CREATE TABLE "run_items" (
 	"id" serial PRIMARY KEY NOT NULL,
 	"run_id" integer NOT NULL,
 	"sku_id" text NOT NULL,
+	"queue" text NOT NULL,
 	"flags" jsonb NOT NULL,
-	"primary_flag" text NOT NULL,
+	"exceptions" jsonb NOT NULL,
 	"metrics" jsonb NOT NULL,
-	"action" text NOT NULL,
-	"recommended_qty" integer NOT NULL,
+	"forecast_weekly" numeric NOT NULL,
+	"recommended_qty" numeric,
+	"action" text,
 	"reason" text,
 	"reason_source" text,
-	"status" text DEFAULT 'pending' NOT NULL,
-	"final_qty" integer,
+	"ai_note" text,
+	"decision" text DEFAULT 'pending' NOT NULL,
+	"final_qty" numeric,
 	"decision_reason" text,
 	"decided_by" text,
 	"decided_at" timestamp with time zone,
-	"purchase_order_id" integer
+	"po_id" integer
 );
 --> statement-breakpoint
-CREATE TABLE "rejected_rows" (
+CREATE TABLE "runs" (
 	"id" serial PRIMARY KEY NOT NULL,
-	"load_id" integer NOT NULL,
-	"row_number" integer NOT NULL,
-	"reason" text NOT NULL,
-	"raw" jsonb
+	"trigger" text NOT NULL,
+	"status" text NOT NULL,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"finished_at" timestamp with time zone,
+	"planning_date" date NOT NULL,
+	"data_through" date,
+	"stock_as_of" date,
+	"rules_version_id" integer,
+	"reason_source" text,
+	"summary" jsonb,
+	"error" text
 );
 --> statement-breakpoint
-CREATE TABLE "rules_config_versions" (
-	"version" serial PRIMARY KEY NOT NULL,
-	"config" jsonb NOT NULL,
-	"changed_by" text NOT NULL,
-	"changed_at" timestamp with time zone DEFAULT now() NOT NULL,
-	"note" text
-);
---> statement-breakpoint
-CREATE TABLE "sku_weekly_sales" (
-	"week_start" date NOT NULL,
-	"sku_id" text NOT NULL,
-	"units" numeric(16, 3) NOT NULL,
-	"distributor_count" integer NOT NULL,
-	CONSTRAINT "sku_weekly_sales_sku_id_week_start_pk" PRIMARY KEY("sku_id","week_start")
+CREATE TABLE "settings" (
+	"key" text PRIMARY KEY NOT NULL,
+	"value" jsonb NOT NULL,
+	"updated_by" text,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
 CREATE TABLE "skus" (
-	"sku_id" text PRIMARY KEY NOT NULL,
+	"id" text PRIMARY KEY NOT NULL,
 	"name" text NOT NULL,
 	"category" text,
-	"is_perishable" boolean NOT NULL,
-	"standard_order_qty" integer NOT NULL,
-	"unit_cost" numeric(12, 2),
-	"unit_price" numeric(12, 2),
-	"price_source" text,
-	"vendor_id" text,
+	"perishable" boolean NOT NULL,
+	"standard_order_qty" numeric NOT NULL,
+	"unit" text DEFAULT 'Units' NOT NULL,
+	"supplier_id" text,
+	"unit_cost" numeric,
+	"unit_price" numeric,
+	"price_source" text DEFAULT 'placeholder' NOT NULL,
 	"zoho_item_id" text,
-	"launch_date" date,
-	"active" boolean DEFAULT true NOT NULL,
-	"extra" jsonb
+	"active" boolean DEFAULT true NOT NULL
+);
+--> statement-breakpoint
+CREATE TABLE "stock_snapshots" (
+	"as_of" date NOT NULL,
+	"sku_id" text NOT NULL,
+	"location" text NOT NULL,
+	"units" numeric NOT NULL,
+	CONSTRAINT "stock_snapshots_as_of_sku_id_location_pk" PRIMARY KEY("as_of","sku_id","location")
 );
 --> statement-breakpoint
 CREATE TABLE "stockout_incidents" (
 	"id" serial PRIMARY KEY NOT NULL,
-	"date" date NOT NULL,
 	"sku_id" text NOT NULL,
-	"distributor_id" text,
-	"est_lost_units" integer,
-	"est_lost_value" numeric(14, 2),
+	"week_start" date NOT NULL,
 	"source" text NOT NULL,
-	"note" text
+	"lost_units" numeric,
+	"lost_value" numeric,
+	"note" text,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL
+);
+--> statement-breakpoint
+CREATE TABLE "tracker_checks" (
+	"check_date" date NOT NULL,
+	"sku_id" text NOT NULL,
+	"week_start" date NOT NULL,
+	"actual_units" numeric NOT NULL,
+	"forecast_units" numeric NOT NULL,
+	"variance_pct" numeric,
+	"stock_units" numeric,
+	"weeks_cover" numeric,
+	"status" text NOT NULL,
+	CONSTRAINT "tracker_checks_check_date_sku_id_pk" PRIMARY KEY("check_date","sku_id")
+);
+--> statement-breakpoint
+CREATE TABLE "uploads" (
+	"id" serial PRIMARY KEY NOT NULL,
+	"kind" text NOT NULL,
+	"filename" text NOT NULL,
+	"content" text NOT NULL,
+	"created_by" text NOT NULL,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
 CREATE TABLE "weekly_sales" (
 	"week_start" date NOT NULL,
 	"sku_id" text NOT NULL,
 	"distributor_id" text NOT NULL,
-	"units" numeric(14, 3) NOT NULL,
-	"value" numeric(14, 2),
-	"load_id" integer,
+	"units" numeric NOT NULL,
 	CONSTRAINT "weekly_sales_week_start_sku_id_distributor_id_pk" PRIMARY KEY("week_start","sku_id","distributor_id")
 );
 --> statement-breakpoint
 CREATE TABLE "zoho_api_log" (
 	"id" serial PRIMARY KEY NOT NULL,
-	"at" timestamp with time zone DEFAULT now() NOT NULL,
-	"mode" text NOT NULL,
 	"method" text NOT NULL,
 	"path" text NOT NULL,
-	"status_code" integer,
-	"request_summary" text,
-	"response_summary" text
+	"status" integer,
+	"summary" text,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
-ALTER TABLE "inventory_snapshots" ADD CONSTRAINT "inventory_snapshots_sku_id_skus_sku_id_fk" FOREIGN KEY ("sku_id") REFERENCES "public"."skus"("sku_id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "weekly_sales" ADD CONSTRAINT "weekly_sales_sku_id_skus_sku_id_fk" FOREIGN KEY ("sku_id") REFERENCES "public"."skus"("sku_id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-CREATE UNIQUE INDEX "recommendations_run_sku" ON "recommendations" USING btree ("run_id","sku_id");--> statement-breakpoint
-CREATE INDEX "weekly_sales_sku_idx" ON "weekly_sales" USING btree ("sku_id","week_start");
+CREATE INDEX "run_items_run" ON "run_items" USING btree ("run_id");--> statement-breakpoint
+CREATE INDEX "weekly_sales_sku" ON "weekly_sales" USING btree ("sku_id");

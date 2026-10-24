@@ -1,35 +1,25 @@
-import { describe, expect, it } from "vitest";
-import { mapLimit, parseReview, reviewFlag } from "@/lib/adapters/gemini";
+import { describe, it, expect, afterEach } from "vitest";
+import { explainFlags, parseReply } from "@/lib/adapters/gemini";
 
-describe("Gemini adapter", () => {
-  it("accepts a well-formed reply", () => {
-    expect(parseReview(JSON.stringify({ reason: "Sales are up 21% and stock covers 3.4 weeks.", unusual: false, unusualWhy: "" }))).toEqual({
-      reason: "Sales are up 21% and stock covers 3.4 weeks.", unusual: false, unusualWhy: "",
-    });
+describe("Gemini reply validation", () => {
+  it("accepts the expected JSON", () => {
+    const r = parseReply(JSON.stringify({ items: [{ skuId: "SKU1", reason: "Sales are up 27% on the 12-week average.", unusual: false, note: "" }] }));
+    expect(r?.[0].skuId).toBe("SKU1");
   });
-  it("rejects malformed replies (caller falls back to the template)", () => {
-    expect(parseReview(undefined)).toBeNull();
-    expect(parseReview("not json")).toBeNull();
-    expect(parseReview(JSON.stringify({ reason: "short" , unusual: false }))).toBeNull();
-    expect(parseReview(JSON.stringify({ reason: "x".repeat(500), unusual: false }))).toBeNull();
+  it("rejects malformed or truncated replies", () => {
+    expect(parseReply('{"items":[{"skuId":"SKU1","reason":"Sales are')).toBeNull();
+    expect(parseReply(JSON.stringify({ items: [{ skuId: "SKU1" }] }))).toBeNull();
+    expect(parseReply(undefined)).toBeNull();
   });
-  it("ignores any quantity Gemini might add — only reason/unusual come through", () => {
-    const r = parseReview(JSON.stringify({ reason: "Demand is up sharply this month.", unusual: true, unusualWhy: "Erratic.", recommendedQty: 9999 }));
-    expect(r).not.toHaveProperty("recommendedQty");
-  });
-  it("returns the template and never routes in mock mode", async () => {
+});
+
+describe("mock mode", () => {
+  const key = process.env.GEMINI_API_KEY;
+  afterEach(() => { process.env.GEMINI_API_KEY = key; });
+  it("uses the template reasons and routes nothing", async () => {
     delete process.env.GEMINI_API_KEY;
-    expect(await reviewFlag({ a: 1 }, "template text")).toEqual({ reason: "template text", unusual: false, unusualWhy: "", source: "template" });
-  });
-  it("mapLimit keeps order and the concurrency cap", async () => {
-    let inFlight = 0, peak = 0;
-    const out = await mapLimit([1, 2, 3, 4, 5, 6, 7], 3, async (n) => {
-      inFlight++; peak = Math.max(peak, inFlight);
-      await new Promise((r) => setTimeout(r, 5));
-      inFlight--;
-      return n * 2;
-    });
-    expect(out).toEqual([2, 4, 6, 8, 10, 12, 14]);
-    expect(peak).toBe(3);
+    const r = await explainFlags([{ skuId: "SKU1", name: "x", category: null, flags: ["STOCKOUT_RISK"], exceptions: [], metrics: {}, template: "Stock covers 2 weeks.", context: [] }]);
+    expect(r.source).toBe("template");
+    expect(r.results[0]).toEqual({ skuId: "SKU1", reason: "Stock covers 2 weeks.", unusual: false, note: "", source: "template" });
   });
 });

@@ -5,29 +5,8 @@
     {
       "idx": 0,
       "version": "7",
-      "when": 1792669075489,
+      "when": 1792825391276,
       "tag": "0000_init",
-      "breakpoints": true
-    },
-    {
-      "idx": 1,
-      "version": "7",
-      "when": 1792674309506,
-      "tag": "0001_run_forecasts",
-      "breakpoints": true
-    },
-    {
-      "idx": 2,
-      "version": "7",
-      "when": 1792674406353,
-      "tag": "0002_tracker_week",
-      "breakpoints": true
-    },
-    {
-      "idx": 3,
-      "version": "7",
-      "when": 1792675470706,
-      "tag": "0003_uploads",
       "breakpoints": true
     }
   ]

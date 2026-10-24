@@ -1,6 +1,13 @@
+/** npm run db:migrate → applies pending migrations (the app also does this on first use). */
 import "./_env";
-import { getDb, closeDb, dbMode } from "../src/lib/db";
+import { closeDb, databaseMode, getDb } from "@/db";
 
-await getDb();
-console.log(`Migrations applied (${dbMode()}).`);
-await closeDb();
+getDb()
+  .then(async () => {
+    console.log(`Migrations applied (${databaseMode() === "postgres" ? "Postgres" : "local PGlite"}).`);
+    await closeDb();
+  })
+  .catch((err) => {
+    console.error(err);
+    process.exit(1);
+  });

@@ -1,9 +1,8 @@
-/**
- * Vercel Cron calls these routes with "Authorization: Bearer <CRON_SECRET>". With no CRON_SECRET set the
- * routes only answer outside production (local testing).
- */
-export function cronAuthorized(authHeader: string | null): boolean {
-  const secret = process.env.CRON_SECRET?.trim();
-  if (!secret) return process.env.NODE_ENV !== "production" && process.env.VERCEL_ENV !== "production";
-  return authHeader === `Bearer ${secret}`;
+import { mode } from "@/lib/integrations";
+import { safeEqual } from "@/lib/auth/session";
+
+/** Vercel Cron sends "Authorization: Bearer <CRON_SECRET>". Without a secret (local dev) the endpoints are open. */
+export function cronAuthorized(req: Request) {
+  if (mode("cron") === "mock") return !process.env.VERCEL;
+  return safeEqual(req.headers.get("authorization") ?? "", `Bearer ${process.env.CRON_SECRET!.trim()}`);
 }

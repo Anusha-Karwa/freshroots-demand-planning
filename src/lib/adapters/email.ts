@@ -1,40 +1,51 @@
 import { Resend } from "resend";
-import { getDb, schema } from "@/lib/db";
-import { integrationMode } from "@/lib/integrations";
+import { schema, type Db } from "@/db";
+import { mode } from "@/lib/integrations";
 
-export interface EmailMessage {
-  to: string;
-  subject: string;
-  text: string;
-}
+/** Resend when RESEND_API_KEY + EMAIL_FROM are set; otherwise the email is printed and saved to mock_emails. */
 
-export interface SendResult {
-  mode: "live" | "mock";
-  id?: string;
-}
+export interface Email { to: string | undefined; subject: string; text: string; html?: string }
 
-/** Sends via Resend when configured; otherwise logs to console + mock_emails. */
-export async function sendEmail(msg: EmailMessage): Promise<SendResult> {
-  if (integrationMode("resend") === "live") {
-    if (!msg.to.includes("@")) {
-      console.warn(`[email] no recipient address for "${msg.subject}" (${msg.to}) — skipped`);
-      return { mode: "live" };
-    }
+export async function sendEmail(db: Db, email: Email): Promise<{ status: "sent" | "mock" | "skipped" | "failed"; detail?: string }> {
+  const live = mode("email") === "live";
+  const to = email.to?.trim();
+
+  if (!live) {
+    const recipient = to || "(recipient not set)";
+    console.log(`[mock email] to=${recipient} subject="${email.subject}"\n${email.text}\n`);
+    await db.insert(schema.mockEmails).values({ to: recipient, subject: email.subject, body: email.text });
+    await db.insert(schema.emailLog).values({ mode: "mock", to: recipient, subject: email.subject, status: "sent" });
+    return { status: "mock" };
+  }
+
+  if (!to) {
+    await db.insert(schema.emailLog).values({ mode: "live", to: "-", subject: email.subject, status: "skipped", detail: "recipient env var not set" });
+    return { status: "skipped", detail: "recipient not set" };
+  }
+
+  try {
     const resend = new Resend(process.env.RESEND_API_KEY);
     const { data, error } = await resend.emails.send({
       from: process.env.EMAIL_FROM!,
-      to: msg.to,
-      subject: msg.subject,
-      text: msg.text,
+      to: to.split(",").map((s) => s.trim()),
+      subject: email.subject,
+      text: email.text,
+      html: email.html ?? textToHtml(email.text),
     });
-    if (error) throw new Error(`Resend: ${error.message}`);
-    return { mode: "live", id: data?.id };
+    if (error) throw new Error(`${error.name}: ${error.message}`);
+    await db.insert(schema.emailLog).values({ mode: "live", to, subject: email.subject, status: "sent", detail: data?.id });
+    return { status: "sent", detail: data?.id };
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    console.error(`[email] failed to send "${email.subject}" to ${to}: ${detail}`);
+    await db.insert(schema.emailLog).values({ mode: "live", to, subject: email.subject, status: "failed", detail });
+    return { status: "failed", detail };
   }
-  console.log(`[email:MOCK] to=${msg.to} subject="${msg.subject}"\n${msg.text}`);
-  const db = await getDb();
-  const [row] = await db
-    .insert(schema.mockEmails)
-    .values({ to: msg.to, subject: msg.subject, body: msg.text })
-    .returning({ id: schema.mockEmails.id });
-  return { mode: "mock", id: String(row.id) };
+}
+
+const escape = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+function textToHtml(text: string) {
+  const linked = escape(text).replace(/(https?:\/\/[^\s]+)/g, '<a href="$1">$1</a>');
+  return `<div style="font-family:system-ui,sans-serif;font-size:14px;line-height:1.5;white-space:pre-wrap">${linked}</div>`;
 }

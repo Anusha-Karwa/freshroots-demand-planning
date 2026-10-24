@@ -1,18 +1,20 @@
 # Seed data
 
-Put the five seed files here as CSV (UTF-8, header row). Default file names:
+The five seed files (synthetic, supplied for the case — not real customer data):
 
 | File | Contents |
 |---|---|
-| `calendar.csv` | One row per month: year, month, festival flag (competitor schemes optional) |
-| `skus.csv` | The 400 SKUs |
-| `distributors.csv` | The 1,200 distributors |
-| `inventory.csv` | Current stock on hand per SKU |
-| `weekly_sales.csv` | Weekly sales by SKU × distributor |
+| `calendar.csv` | One row per month: Year, Month, Year_Month, Is_Festival_Month |
+| `skus.csv` | SKU_ID, SKU_Name, Category, Perishability, Standard_Reorder_Qty, Unit_of_Measure, Distributor_ID (= supplier) |
+| `distributors.csv` | Distributor_ID, Distributor_Name, Region, Status |
+| `inventory.csv` | SKU_ID, Location, Units_On_Hand, As_Of_Date |
+| `weekly_sales.csv` | SKU_ID, Week (ISO week), Units_Sold |
 
-Other names work too: `npm run seed -- --skus path/to/file.csv`.
+`../placeholder_prices.csv` adds a made-up unit cost and price per SKU until real prices are loaded.
+An optional `planner_history.csv` (Week, SKU, Flag) here is loaded too, for the backtest's agreement score.
 
-The current files are synthetic seed data supplied for the case (not real customer data).
-
-Before loading, run `npm run seed -- --inspect` to see the columns found in each file and
-how they map to the database.
+```bash
+npm run seed -- --inspect   # show the columns found in each file and how they map
+npm run seed                # load them (prints row counts and any rejected rows)
+npm run seed -- --sales other.csv   # use another file for one kind
+```

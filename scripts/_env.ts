@@ -1,6 +1,4 @@
-// Load .env for CLI scripts (Next.js loads it on its own).
-try {
-  process.loadEnvFile(".env");
-} catch {
-  // no .env — every integration falls back to mock mode
-}
+// Scripts run outside Next.js, so load .env ourselves (Node 22 built-in). Import this first.
+import fs from "node:fs";
+
+for (const file of [".env.local", ".env"]) if (fs.existsSync(file)) process.loadEnvFile(file);

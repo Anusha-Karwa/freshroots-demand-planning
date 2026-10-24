@@ -1,77 +1,81 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, it, expect } from "vitest";
+import { ZohoClient, ZohoError } from "@/lib/adapters/zoho";
 
-vi.mock("@/lib/db", () => ({ getDb: async () => ({ insert: () => ({ values: async () => undefined }) }), schema: { zohoApiLog: {} } }));
-const { accessToken, resetZohoTokenCache, toZohoPayload, zohoRequest } = await import("@/lib/adapters/zoho");
-const { cronAuthorized } = await import("@/lib/cron");
+/** A fake Zoho server: scripted responses per call, and a record of what was sent. */
+function fakeZoho(script: ((url: string, init: RequestInit) => { status: number; body: unknown; headers?: Record<string, string> })[]) {
+  const calls: { url: string; init: RequestInit }[] = [];
+  const fetcher = (async (url: string | URL, init: RequestInit = {}) => {
+    calls.push({ url: String(url), init });
+    const step = script.shift();
+    if (!step) throw new Error(`unexpected call ${url}`);
+    const r = step(String(url), init);
+    return new Response(JSON.stringify(r.body), { status: r.status, headers: r.headers });
+  }) as typeof fetch;
+  const logs: string[] = [];
+  const client = new ZohoClient(
+    { clientId: "id", clientSecret: "secret", refreshToken: "rt", orgId: "ORG1", accountsUrl: "https://accounts.zoho.in", apiBase: "https://www.zohoapis.in/inventory/v1" },
+    async (e) => { logs.push(`${e.method} ${e.path} ${e.status}`); },
+    fetcher,
+    async () => undefined,
+  );
+  return { client, calls, logs };
+}
 
-const json = (status: number, body: unknown, headers: Record<string, string> = {}) =>
-  new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json", ...headers } });
+const token = (value = "AT1") => () => ({ status: 200, body: { access_token: value, expires_in: 3600 } });
+const po = () => () => ({ status: 201, body: { code: 0, message: "created", purchaseorder: { purchaseorder_id: "PO9", purchaseorder_number: "PO-00009", status: "draft" } } });
 
-beforeEach(() => {
-  resetZohoTokenCache();
-  Object.assign(process.env, {
-    ZOHO_CLIENT_ID: "id", ZOHO_CLIENT_SECRET: "secret", ZOHO_REFRESH_TOKEN: "refresh", ZOHO_ORGANIZATION_ID: "60001",
-    ZOHO_ACCOUNTS_URL: "https://accounts.zoho.in", ZOHO_API_BASE: "https://www.zohoapis.in/inventory/v1",
-  });
-});
+const input = {
+  vendorId: "V1", date: "2026-10-24", reference: "FR-RUN1-PO1", notes: "n",
+  lines: [{ skuId: "SKU001", name: "Mango", unit: "Units", qty: 750, rate: 14, zohoItemId: "I1" }],
+};
 
 describe("Zoho client", () => {
-  it("caches the access token until a minute before expiry", async () => {
-    const f = vi.fn(async () => json(200, { access_token: "tok-1", expires_in: 3600 }));
-    expect(await accessToken(f as never, 0)).toBe("tok-1");
-    expect(await accessToken(f as never, 3_000_000)).toBe("tok-1");
-    expect(f).toHaveBeenCalledTimes(1);
-    f.mockImplementation(async () => json(200, { access_token: "tok-2", expires_in: 3600 }));
-    expect(await accessToken(f as never, 3_550_000)).toBe("tok-2");
+  it("refreshes a token, creates a draft PO, and caches the token", async () => {
+    const { client, calls, logs } = fakeZoho([token(), po(), po()]);
+    const r = await client.createDraftPurchaseOrder(input);
+    expect(r).toEqual({ id: "PO9", number: "PO-00009", status: "draft", itemIds: { SKU001: "I1" } });
+    expect(calls[0].url).toBe("https://accounts.zoho.in/oauth/v2/token");
+    expect(String(calls[0].init.body)).toContain("grant_type=refresh_token");
+    expect(calls[1].url).toBe("https://www.zohoapis.in/inventory/v1/purchaseorders?organization_id=ORG1");
+    expect((calls[1].init.headers as Record<string, string>).Authorization).toBe("Zoho-oauthtoken AT1");
+    const body = JSON.parse(String(calls[1].init.body));
+    expect(body.vendor_id).toBe("V1");
+    expect(body.line_items).toEqual([{ item_id: "I1", quantity: 750, rate: 14, description: "SKU001 Mango" }]);
+    expect(body).not.toHaveProperty("status"); // never marked issued/open
+    await client.createDraftPurchaseOrder(input);
+    expect(calls.filter((c) => c.url.includes("oauth")).length).toBe(1);
+    expect(logs).toContain("POST /purchaseorders 201");
   });
 
-  it("explains a failed token refresh", async () => {
-    const f = async () => json(400, { error: "invalid_client" });
-    await expect(accessToken(f as never)).rejects.toThrow(/invalid_client.*\.in data centre/);
-  });
-
-  it("adds the org id, retries a 429 and returns the body", async () => {
-    const calls: string[] = [];
-    let n = 0;
-    const f = async (url: string) => {
-      calls.push(url);
-      if (url.includes("oauth")) return json(200, { access_token: "t", expires_in: 3600 });
-      return ++n === 1 ? json(429, { code: 1, message: "rate limited" }) : json(201, { code: 0, message: "created", purchaseorder: { purchaseorder_id: "9" } });
-    };
-    const r = await zohoRequest<{ purchaseorder: { purchaseorder_id: string } }>("POST", "/purchaseorders", {}, { f: f as never, retryDelayMs: 1 });
-    expect(r.purchaseorder.purchaseorder_id).toBe("9");
-    expect(calls.filter((u) => u.includes("purchaseorders"))).toHaveLength(2);
-    expect(calls[1]).toBe("https://www.zohoapis.in/inventory/v1/purchaseorders?organization_id=60001");
-  });
-
-  it("throws Zoho's own message on a business error", async () => {
-    const f = async (url: string) =>
-      url.includes("oauth") ? json(200, { access_token: "t" }) : json(400, { code: 1002, message: "Vendor does not exist." });
-    await expect(zohoRequest("POST", "/purchaseorders", {}, { f: f as never })).rejects.toThrow(/code 1002\): Vendor does not exist/);
-  });
-
-  it("builds a draft PO payload with item ids where known", () => {
-    const p = toZohoPayload({
-      vendorId: "V1", referenceNumber: "FR-PO-1", date: "2026-10-22", notes: "n",
-      lines: [{ skuId: "A", zohoItemId: "I-1", name: "Atta", quantity: 5, rate: 10 }, { skuId: "B", name: "Bread", quantity: 2, rate: 3 }],
-    });
-    expect(p.line_items).toEqual([
-      { item_id: "I-1", description: "A", quantity: 5, rate: 10 },
-      { name: "Bread", description: "B", quantity: 2, rate: 3 },
+  it("retries after a 429 and re-authenticates once after a 401", async () => {
+    const { client, calls } = fakeZoho([
+      token("AT1"),
+      () => ({ status: 429, body: { code: 1070, message: "rate limited" }, headers: { "retry-after": "1" } }),
+      () => ({ status: 401, body: { code: 57, message: "expired" } }),
+      token("AT2"),
+      po(),
     ]);
-    expect(p).not.toHaveProperty("status");
+    const r = await client.createDraftPurchaseOrder(input);
+    expect(r.number).toBe("PO-00009");
+    expect((calls[4].init.headers as Record<string, string>).Authorization).toBe("Zoho-oauthtoken AT2");
   });
-});
 
-describe("cron auth", () => {
-  it("needs the bearer secret when CRON_SECRET is set", () => {
-    process.env.CRON_SECRET = "s3cret";
-    expect(cronAuthorized("Bearer s3cret")).toBe(true);
-    expect(cronAuthorized("Bearer nope")).toBe(false);
-    expect(cronAuthorized(null)).toBe(false);
+  it("surfaces Zoho's error message", async () => {
+    const { client } = fakeZoho([token(), () => ({ status: 400, body: { code: 1001, message: "Vendor does not exist" } })]);
+    await expect(client.createDraftPurchaseOrder(input)).rejects.toThrow(/Vendor does not exist/);
   });
-  it("without a secret, only answers outside production", () => {
-    delete process.env.CRON_SECRET;
-    expect(cronAuthorized(null)).toBe(true); // vitest runs with NODE_ENV=test
+
+  it("explains a bad refresh token", async () => {
+    const { client } = fakeZoho([() => ({ status: 200, body: { error: "invalid_code" } })]);
+    await expect(client.accessToken()).rejects.toBeInstanceOf(ZohoError);
+  });
+
+  it("finds an existing item by SKU or creates one", async () => {
+    const found = fakeZoho([token(), () => ({ status: 200, body: { code: 0, items: [{ item_id: "I7", sku: "SKU001" }] } })]);
+    expect(await found.client.ensureItem({ id: "SKU001", name: "Mango", unit: "Units", unitCost: 14, unitPrice: 18 })).toBe("I7");
+    const created = fakeZoho([token(), () => ({ status: 200, body: { code: 0, items: [] } }), () => ({ status: 201, body: { code: 0, item: { item_id: "I8" } } })]);
+    expect(await created.client.ensureItem({ id: "SKU002", name: "Cookies", unit: "Units", unitCost: 32, unitPrice: 40 })).toBe("I8");
+    const body = JSON.parse(String(created.calls[2].init.body));
+    expect(body).toMatchObject({ sku: "SKU002", purchase_rate: 32, rate: 40, item_type: "inventory" });
   });
 });

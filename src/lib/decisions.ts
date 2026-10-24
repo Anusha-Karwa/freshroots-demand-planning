@@ -1,136 +1,89 @@
-import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
-import { getDb, schema } from "@/lib/db";
-import type { User } from "@/lib/auth";
-import { rulesConfigSchema, type RulesConfig } from "@/lib/config/rules";
+import { and, eq, inArray, isNull } from "drizzle-orm";
+import { schema, type Db } from "@/db";
+import { daysBetween, todayIst } from "@/lib/dates";
+import { latestRun } from "@/lib/forecast/run";
 
 /**
- * Raghav's final call. Rules set the recommended quantity; only these functions change what gets ordered,
- * and every change records who, when and why.
+ * Raghav's final call. Approve keeps the rules' quantity; Edit changes it; Reject orders nothing.
+ * Edit and Reject need a reason. Exceptions have no recommended quantity, so approving one means Raghav sets it.
+ * Every call (including a change of mind) is appended to decision_log.
  */
 
-export type Decision =
-  | { kind: "approve" }
-  | { kind: "edit"; qty: number; reason: string }
-  | { kind: "reject"; reason: string };
+export type Decision = "approved" | "edited" | "rejected";
 
-/** Validates a decision from form input. Edit and reject need a reason; quantities are whole and ≥ 0. */
-export function parseDecision(kind: string, qtyRaw: unknown, reasonRaw: unknown): Decision {
-  const reason = String(reasonRaw ?? "").trim();
-  if (kind === "approve") return { kind };
-  if (kind === "reject") {
-    if (reason.length < 3) throw new Error("A reason is required to reject.");
-    return { kind, reason };
+export class DecisionError extends Error {}
+
+export interface DecideInput { itemId: number; decision: Decision; qty?: number | null; reason?: string | null; by: string }
+
+/** Pure validation, exported for tests. Returns the normalised decision and final quantity. */
+export function resolveDecision(
+  item: { queue: string; recommendedQty: number | null },
+  input: Pick<DecideInput, "decision" | "qty" | "reason">,
+): { decision: Decision; finalQty: number; reason: string | null } {
+  const reason = input.reason?.trim() || null;
+  const qty = input.qty;
+  if (qty != null && (!Number.isFinite(qty) || qty < 0)) throw new DecisionError("Quantity must be a number of 0 or more.");
+
+  if (input.decision === "rejected") {
+    if (!reason) throw new DecisionError("A reason is required to reject.");
+    return { decision: "rejected", finalQty: 0, reason };
   }
-  if (kind === "edit") {
-    const qty = Number(qtyRaw);
-    if (!Number.isInteger(qty) || qty < 0) throw new Error("Quantity must be a whole number ≥ 0.");
-    if (reason.length < 3) throw new Error("A reason is required to change the quantity.");
-    return { kind, qty, reason };
+
+  if (item.queue === "exception") {
+    // Judgement cases: there is no rule recommendation to approve or edit, Raghav sets the quantity.
+    if (qty == null) throw new DecisionError("Set a quantity for this exception (0 to order nothing).");
+    return { decision: "approved", finalQty: qty, reason };
   }
-  throw new Error(`Unknown decision "${kind}".`);
+
+  if (input.decision === "approved") return { decision: "approved", finalQty: item.recommendedQty ?? 0, reason };
+
+  if (qty == null) throw new DecisionError("Enter the edited quantity.");
+  if (!reason) throw new DecisionError("A reason is required to edit the quantity.");
+  // Editing to the recommended quantity is an approval (the reason is still kept).
+  if (qty === item.recommendedQty) return { decision: "approved", finalQty: qty, reason };
+  return { decision: "edited", finalQty: qty, reason };
 }
 
-/** Still changeable: not yet turned into a purchase order. */
-const open = isNull(schema.recommendations.purchaseOrderId);
+export async function decide(db: Db, input: DecideInput) {
+  const [item] = await db.select().from(schema.runItems).where(eq(schema.runItems.id, input.itemId));
+  if (!item) throw new DecisionError("Recommendation not found.");
+  const run = await latestRun(db);
+  if (!run || item.runId !== run.id) throw new DecisionError("This recommendation is from an older run. Decide on the latest run.");
+  if (item.poId) throw new DecisionError("Already on a purchase order; change it in Zoho.");
+  if (item.queue === "none") throw new DecisionError("This SKU was not flagged.");
 
-export async function decideRecommendation(id: number, d: Decision, user: User) {
-  const db = await getDb();
-  const [rec] = await db.select().from(schema.recommendations).where(eq(schema.recommendations.id, id));
-  if (!rec) throw new Error("Recommendation not found.");
-  if (rec.purchaseOrderId) throw new Error("Already on a purchase order; change it in the PO instead.");
-  const set =
-    d.kind === "approve"
-      ? { status: "approved", finalQty: rec.recommendedQty, decisionReason: null }
-      : d.kind === "edit"
-        ? { status: d.qty === rec.recommendedQty ? "approved" : "edited", finalQty: d.qty, decisionReason: d.reason }
-        : { status: "rejected", finalQty: 0, decisionReason: d.reason };
-  await db
-    .update(schema.recommendations)
-    .set({ ...set, decidedBy: user.name, decidedAt: new Date() })
-    .where(and(eq(schema.recommendations.id, id), open));
+  const r = resolveDecision(item, input);
+  await save(db, item, r, input.by, run.dataThrough);
+  return r;
 }
 
-/** Bulk approve is allowed for STOCKOUT_RISK lines only, and only the ids the planner confirmed on screen. */
-export async function bulkApproveStockout(runId: number, ids: number[], user: User) {
-  if (!ids.length) return 0;
-  const db = await getDb();
-  const rows = await db
-    .update(schema.recommendations)
-    .set({
-      status: "approved",
-      finalQty: sql`${schema.recommendations.recommendedQty}`,
-      decisionReason: null,
-      decidedBy: user.name,
-      decidedAt: new Date(),
-    })
-    .where(
-      and(
-        eq(schema.recommendations.runId, runId),
-        inArray(schema.recommendations.id, ids),
-        eq(schema.recommendations.primaryFlag, "STOCKOUT_RISK"),
-        eq(schema.recommendations.status, "pending"),
-        open,
-      ),
-    )
-    .returning({ id: schema.recommendations.id });
-  return rows.length;
-}
-
-export type ExceptionDecision = { kind: "order"; qty: number; note: string } | { kind: "no_action"; note: string };
-
-export function parseExceptionDecision(kind: string, qtyRaw: unknown, noteRaw: unknown): ExceptionDecision {
-  const note = String(noteRaw ?? "").trim();
-  if (note.length < 3) throw new Error("A note is required — this is a judgement call.");
-  if (kind === "no_action") return { kind, note };
-  if (kind === "order") {
-    const qty = Number(qtyRaw);
-    if (!Number.isInteger(qty) || qty <= 0) throw new Error("Order quantity must be a whole number > 0.");
-    return { kind, qty, note };
+/** Bulk approve is only for STOCKOUT_RISK lines in the review queue, after Raghav ticks "I have reviewed these". */
+export async function bulkApproveStockouts(db: Db, opts: { itemIds: number[]; reviewed: boolean; by: string }) {
+  if (!opts.reviewed) throw new DecisionError("Tick “I have reviewed these lines” first.");
+  if (!opts.itemIds.length) throw new DecisionError("No lines selected.");
+  const run = await latestRun(db);
+  if (!run) throw new DecisionError("No run yet.");
+  const items = await db.select().from(schema.runItems).where(and(
+    inArray(schema.runItems.id, opts.itemIds), eq(schema.runItems.runId, run.id), eq(schema.runItems.queue, "review"),
+    eq(schema.runItems.decision, "pending"), isNull(schema.runItems.poId),
+  ));
+  const eligible = items.filter((i) => i.flags.includes("STOCKOUT_RISK"));
+  for (const item of eligible) {
+    await save(db, item, { decision: "approved", finalQty: item.recommendedQty ?? 0, reason: "Bulk approved (stockout risk)" }, opts.by, run.dataThrough);
   }
-  throw new Error(`Unknown decision "${kind}".`);
+  return eligible.length;
 }
 
-export async function decideException(id: number, d: ExceptionDecision, user: User) {
-  const db = await getDb();
-  await db
-    .update(schema.exceptions)
-    .set({
-      status: d.kind === "order" ? "ordered" : "no_action",
-      plannerQty: d.kind === "order" ? d.qty : null,
-      plannerNote: d.note,
-      decidedBy: user.name,
-      decidedAt: new Date(),
-    })
-    .where(and(eq(schema.exceptions.id, id), isNull(schema.exceptions.purchaseOrderId)));
-}
-
-/** Saves a new rules version. Returns the new version number. */
-export async function saveRules(config: RulesConfig, note: string, user: User) {
-  const parsed = rulesConfigSchema.parse(config);
-  if (note.trim().length < 3) throw new Error("Say why the rules changed.");
-  const db = await getDb();
-  const [row] = await db
-    .insert(schema.rulesConfigVersions)
-    .values({ config: parsed, changedBy: user.name, note: note.trim() })
-    .returning({ version: schema.rulesConfigVersions.version });
-  return row.version;
-}
-
-export async function rulesHistory() {
-  const db = await getDb();
-  return db.select().from(schema.rulesConfigVersions).orderBy(desc(schema.rulesConfigVersions.version));
-}
-
-/** Human-readable list of what changed between two configs, e.g. "highDemand.thresholdPct: 20 → 25". */
-export function diffConfig(a: unknown, b: unknown, prefix = ""): string[] {
-  if (JSON.stringify(a) === JSON.stringify(b)) return [];
-  const isObj = (x: unknown) => x !== null && typeof x === "object" && !Array.isArray(x);
-  if (isObj(a) && isObj(b)) {
-    const keys = new Set([...Object.keys(a as object), ...Object.keys(b as object)]);
-    return [...keys].flatMap((k) =>
-      diffConfig((a as Record<string, unknown>)[k], (b as Record<string, unknown>)[k], prefix ? `${prefix}.${k}` : k),
-    );
-  }
-  const show = (x: unknown) => (x === undefined ? "—" : Array.isArray(x) ? `[${x.join(", ")}]` : String(x));
-  return [`${prefix}: ${show(a)} → ${show(b)}`];
+async function save(
+  db: Db, item: typeof schema.runItems.$inferSelect,
+  r: { decision: Decision; finalQty: number; reason: string | null }, by: string, dataThrough: string | null,
+) {
+  const dataAgeDays = dataThrough ? daysBetween(dataThrough, todayIst()) : null;
+  await db.update(schema.runItems).set({
+    decision: r.decision, finalQty: r.finalQty, decisionReason: r.reason, decidedBy: by, decidedAt: new Date(),
+  }).where(eq(schema.runItems.id, item.id));
+  await db.insert(schema.decisionLog).values({
+    runItemId: item.id, runId: item.runId, skuId: item.skuId, decision: r.decision,
+    recommendedQty: item.recommendedQty, finalQty: r.finalQty, reason: r.reason, decidedBy: by, dataAgeDays,
+  });
 }

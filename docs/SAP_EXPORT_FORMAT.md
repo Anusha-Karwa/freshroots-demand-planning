@@ -1,49 +1,54 @@
 # SAP export format
 
-The IT team's SAP export replaces the seed data by uploading CSVs on the **Data** page (phase 3), or by
-dropping them into `data/seed/` and running `npm run seed`. Column names do not have to match exactly —
-the loader matches common SAP names (e.g. `Material`, `Sold-to`, `Unrestricted stock`) and the upload page
-has a mapping step for anything else.
+The IT team uploads the SAP export on the **Data** page (Upload → map columns → load), before the Mon/Thu
+06:00 IST run. Headers don't have to match: common SAP names are recognised, and the mapping step covers the rest.
+Uploads **add to / update** what is loaded; for sales, a file replaces the week × SKU combinations it contains.
 
-**General:** CSV, UTF-8, comma-separated, one header row. Dates as `YYYY-MM-DD`, `DD-MM-YYYY`, `DD.MM.YYYY`,
-`YYYYMMDD`, or an ISO week (`2026-W27`, read as that week's Monday). Numbers may contain `₹` and thousands separators (`1,23,456.50`).
+**General:** CSV, UTF-8, one header row. Excel → *Save As → CSV UTF-8*. Dates as `YYYY-MM-DD`, `DD-MM-YYYY`,
+`DD/MM/YYYY`, `DD.MM.YYYY`, `YYYYMMDD` or an ISO week (`2026-W27` = that week's Monday). Numbers may contain `₹`,
+`Rs.` and Indian thousands separators (`1,23,456.50`); SAP's trailing minus (`120-`) and `(120)` read as negative.
 
-## 1. Weekly sales (`weekly_sales.csv`) — sales by SKU × distributor × week
+## 1. Weekly sales — one row per week × SKU × distributor
 
-| Field | Required | Accepted header names | Notes |
+| Field | Required | Recognised headers | Notes |
 |---|---|---|---|
-| week start | yes | week_start, week, posting_week, week_beginning | First day of the week (Monday) |
-| SKU | yes | sku_id, sku, material, material_code, item_code | Must exist in the SKU master |
-| distributor | no, but recommended | distributor_id, customer, customer_code, sold_to | Must exist in the distributor master. Without it sales are per SKU only and the distributor-concentration exception (rule 6b) is off |
-| units | yes | units, units_sold, qty, quantity, billed_qty | Decimals allowed; negative = returns |
-| value (₹) | no | value, sales_value, net_value, amount | |
+| Week | yes | Week, Week_Start, Posting_Week, Billing_Date, Date | Any date in the week works; it is snapped to the Monday |
+| SKU | yes | SKU_ID, SKU, Material, Material_Code, Item_Code | Must be in the SKU master |
+| Distributor | recommended | Distributor_ID, Customer, Customer_Code, Sold_To | Must be in the distributor master. Without it, sales are SKU-level and the single-distributor exception (rule 6b) is off |
+| Units | yes | Units_Sold, Units, Qty, Billed_Qty, Quantity | Decimals allowed; negative = net returns |
 
-## 2. Stock on hand (`inventory.csv`)
+Several rows for the same week × SKU × distributor (e.g. one per billing line) are **added together**.
 
-| Field | Required | Accepted header names | Notes |
+## 2. Stock on hand
+
+| Field | Required | Recognised headers | Notes |
 |---|---|---|---|
-| SKU | yes | sku_id, material, item_code | |
-| stock on hand | yes | stock_on_hand, soh, unrestricted_stock, closing_stock | Must be ≥ 0 |
-| snapshot date | no | snapshot_date, as_of, stock_date | Default: day after last sales week |
-| location | no | location, plant, warehouse, storage_location | Default `ALL`; stock is summed across locations |
+| SKU | yes | SKU_ID, Material, Item_Code | |
+| Units on hand | yes | Units_On_Hand, Stock_On_Hand, SOH, Unrestricted_Stock, Closing_Stock | Must be ≥ 0 |
+| As-of date | no | As_Of_Date, Snapshot_Date, Stock_Date | Default: the day after the latest sales week |
+| Location | no | Location, Plant, Warehouse, Storage_Location | Stock is summed across locations |
+
+Weekly stock snapshots (one file per week) also let the backtest replay the stockout/overstock flags.
 
 ## 3. Masters (only when they change)
 
-**SKUs (`skus.csv`)**: sku_id, name, **is_perishable** (Y/N or High/Low), **standard_order_qty** (> 0; also
-read from `Standard_Reorder_Qty`) are required — the rules cannot run without the last two. Optional:
-category, unit_cost, unit_price, vendor_id (the supplier; also read from `Distributor_ID`), launch_date, active.
+- **SKUs**: SKU_ID, SKU_Name, **Perishability** (High/Low or Y/N), **Standard_Reorder_Qty** (> 0) are required —
+  the rules cannot run without the last two. Optional: Category, Unit_of_Measure, Distributor_ID (= the supplier,
+  mapped to a Zoho vendor), Unit_Cost, Unit_Price (replace the placeholder prices).
+- **Distributors**: Distributor_ID, Distributor_Name; optional Region, Status.
+- **Calendar**: Year_Month (or Year + Month), Is_Festival_Month; optional Festival_Name, Competitor_Scheme.
+  The rules use the festival months on the Rules page; the calendar is context for Gemini.
+- **Raghav's past recommendations** (optional, for the backtest's agreement score): Week, SKU, Flag
+  (`HIGH_DEMAND`, `STOCKOUT_RISK`, `OVERSTOCK_RISK` or `NONE`).
 
-**Distributors (`distributors.csv`)**: distributor_id, name required; district, region, state, active optional.
+## Validation
 
-**Calendar (`calendar.csv`)**: one row per month — year and month required; is_festival (also
-`Is_Festival_Month`), festival_name, competitor_scheme optional. A sales week counts in the month its
-Thursday falls in.
-
-## Validation on load
-Rows are rejected (and listed with row number and reason) when: a required value is missing or unreadable,
-a sales row's SKU or distributor is unknown, a sales week's month is not in the calendar, or stock is negative.
-The load summary also flags missing weeks.
+Rejected rows are listed with their row number and reason: missing/unreadable values, a SKU or distributor not in
+the masters, negative stock, perishability or order quantity the rules can't use. Warnings (loaded anyway): missing
+weeks (they read as zero sales), a newest week that covers only some SKUs, sales in months missing from the calendar,
+SKUs without a stock figure (they go to the exceptions queue).
 
 ## Suggested SAP sources
-- Sales: billing documents (VBRK/VBRP) aggregated by ISO week, material and sold-to party.
-- Stock: MARD/MB52 unrestricted stock by material, summed across storage locations.
+
+- Sales: billing documents (VBRK/VBRP) summed by ISO week, material and sold-to party.
+- Stock: MB52 / MARD unrestricted stock by material (all storage locations).

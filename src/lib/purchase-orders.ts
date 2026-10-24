@@ -1,222 +1,158 @@
-import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
-import { getDb, schema } from "@/lib/db";
-import type { User } from "@/lib/auth";
-import { integrationMode } from "@/lib/integrations";
-import { createDraftPurchaseOrder, getPurchaseOrderStatus } from "@/lib/adapters/zoho";
-import { latestRun } from "@/lib/queries";
-import { todayIST } from "@/lib/tracker";
+import { and, desc, eq, gt, inArray, isNull } from "drizzle-orm";
+import { schema, type Db } from "@/db";
+import { daysBetween, todayIst } from "@/lib/dates";
+import { zohoAdapter, type PoLineInput } from "@/lib/adapters/zoho";
+import { latestRun } from "@/lib/forecast/run";
+import { mode } from "@/lib/integrations";
+import { notifyProcurement } from "@/lib/notify";
+import { getVendorMap } from "@/lib/settings";
 
 /**
- * Raghav's approved lines → one draft PO per supplier → Zoho (or mock). Only the latest run's lines are
- * used, so an older approval can't double-order a SKU. Procurement confirms the draft inside Zoho.
+ * Approved lines → one DRAFT purchase order per supplier in Zoho (or the mock). Only the latest run's lines are
+ * ordered, so an older approval can never double-order a SKU. Procurement confirms the draft inside Zoho.
  */
 
 export interface OrderLine {
-  source: "recommendation" | "exception";
-  id: number;
-  skuId: string;
-  name: string;
-  vendorId: string | null;
-  zohoItemId: string | null;
-  quantity: number;
-  unitCost: number | null;
-  priceSource: string | null;
+  itemId: number; skuId: string; name: string; unit: string; supplierId: string; qty: number; rate: number;
+  zohoItemId: string | null; placeholderPrice: boolean;
 }
 
-export interface VendorGroup {
-  supplierId: string; // our supplier id (SKU file's Distributor_ID), or "DEFAULT"
-  zohoVendorId: string; // where the PO goes
-  lines: OrderLine[];
-  totalValue: number;
-  placeholderPrices: boolean;
-}
-
-export const DEFAULT_SUPPLIER = "DEFAULT";
-
-/** Group lines by supplier and map each supplier to a Zoho vendor id. Pure, for testing. */
-export function groupByVendor(lines: OrderLine[], vendorMap: Record<string, string>, defaultVendor: string | undefined): VendorGroup[] {
-  const groups = new Map<string, OrderLine[]>();
+/** Groups lines by supplier and resolves each supplier's Zoho vendor. Pure; exported for tests. */
+export function groupBySupplier(lines: OrderLine[], vendorMap: Record<string, string>, defaultVendor: string | undefined, live: boolean) {
+  const groups = new Map<string, { supplierId: string; vendorId: string | null; lines: OrderLine[] }>();
   for (const l of lines) {
-    if (l.quantity <= 0) continue;
-    const key = l.vendorId || DEFAULT_SUPPLIER;
-    groups.set(key, [...(groups.get(key) ?? []), l]);
+    const g = groups.get(l.supplierId) ?? groups.set(l.supplierId, {
+      supplierId: l.supplierId,
+      vendorId: vendorMap[l.supplierId] || defaultVendor || (live ? null : `MOCK-VENDOR-${l.supplierId}`),
+      lines: [],
+    }).get(l.supplierId)!;
+    g.lines.push(l);
   }
-  return [...groups.entries()]
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([supplierId, ls]) => ({
-      supplierId,
-      zohoVendorId: vendorMap[supplierId] || defaultVendor || supplierId,
-      lines: ls.sort((a, b) => a.skuId.localeCompare(b.skuId)),
-      totalValue: ls.reduce((a, l) => a + l.quantity * (l.unitCost ?? 0), 0),
-      placeholderPrices: ls.some((l) => l.priceSource === "placeholder"),
-    }));
+  return [...groups.values()];
 }
 
-export async function vendorMap(): Promise<Record<string, string>> {
-  const db = await getDb();
-  const [row] = await db.select().from(schema.appSettings).where(eq(schema.appSettings.key, "zoho_vendor_map"));
-  return (row?.value as Record<string, string>) ?? {};
+/** Approved, not-yet-ordered lines of the latest run with a quantity above zero. */
+export async function linesToOrder(db: Db): Promise<OrderLine[]> {
+  const run = await latestRun(db);
+  if (!run) return [];
+  const rows = await db.select({ item: schema.runItems, sku: schema.skus })
+    .from(schema.runItems)
+    .innerJoin(schema.skus, eq(schema.skus.id, schema.runItems.skuId))
+    .where(and(
+      eq(schema.runItems.runId, run.id), inArray(schema.runItems.decision, ["approved", "edited"]),
+      gt(schema.runItems.finalQty, 0), isNull(schema.runItems.poId),
+    ));
+  return rows.map(({ item, sku }) => ({
+    itemId: item.id, skuId: sku.id, name: sku.name, unit: sku.unit, supplierId: sku.supplierId ?? "UNASSIGNED",
+    qty: item.finalQty!, rate: sku.unitCost ?? 0, zohoItemId: sku.zohoItemId, placeholderPrice: sku.priceSource === "placeholder",
+  }));
 }
 
-export async function saveVendorMap(map: Record<string, string>, user: User) {
-  const db = await getDb();
-  const value = Object.fromEntries(Object.entries(map).filter(([, v]) => v.trim()).map(([k, v]) => [k, v.trim()]));
-  await db
-    .insert(schema.appSettings)
-    .values({ key: "zoho_vendor_map", value, updatedBy: user.name })
-    .onConflictDoUpdate({ target: schema.appSettings.key, set: { value, updatedBy: user.name, updatedAt: new Date() } });
-}
+export async function createPurchaseOrders(db: Db, by: string) {
+  const run = await latestRun(db);
+  const lines = await linesToOrder(db);
+  if (!run || !lines.length) return { created: 0, failed: 0, pos: [] as number[] };
 
-/** Approved / edited recommendations with qty > 0 and "order" exceptions from the latest run, not yet on a PO. */
-export async function readyLines(): Promise<{ runId: number | null; dataAsOf: string | null; lines: OrderLine[] }> {
-  const run = await latestRun();
-  if (!run) return { runId: null, dataAsOf: null, lines: [] };
-  const db = await getDb();
-  const recs = await db
-    .select({ r: schema.recommendations, s: schema.skus })
-    .from(schema.recommendations)
-    .innerJoin(schema.skus, eq(schema.skus.skuId, schema.recommendations.skuId))
-    .where(
-      and(
-        eq(schema.recommendations.runId, run.id),
-        inArray(schema.recommendations.status, ["approved", "edited"]),
-        sql`${schema.recommendations.finalQty} > 0`,
-        isNull(schema.recommendations.purchaseOrderId),
-      ),
-    );
-  const exs = await db
-    .select({ e: schema.exceptions, s: schema.skus })
-    .from(schema.exceptions)
-    .innerJoin(schema.skus, eq(schema.skus.skuId, schema.exceptions.skuId))
-    .where(and(eq(schema.exceptions.runId, run.id), eq(schema.exceptions.status, "ordered"), isNull(schema.exceptions.purchaseOrderId)));
-  const line = (source: OrderLine["source"], id: number, s: typeof schema.skus.$inferSelect, quantity: number): OrderLine => ({
-    source, id, skuId: s.skuId, name: s.name, vendorId: s.vendorId, zohoItemId: s.zohoItemId, quantity,
-    unitCost: s.unitCost, priceSource: s.priceSource,
-  });
-  return {
-    runId: run.id,
-    dataAsOf: run.dataAsOf,
-    lines: [
-      ...recs.map(({ r, s }) => line("recommendation", r.id, s, r.finalQty!)),
-      ...exs.map(({ e, s }) => line("exception", e.id, s, e.plannerQty!)),
-    ],
-  };
-}
+  const zoho = zohoAdapter(db);
+  const groups = groupBySupplier(lines, await getVendorMap(db), process.env.ZOHO_DEFAULT_VENDOR_ID?.trim(), zoho.mode === "live");
+  const dataAgeDays = run.dataThrough ? daysBetween(run.dataThrough, todayIst()) : null;
+  const created: number[] = [];
+  let failed = 0;
 
-export interface CreatedPo {
-  id: number;
-  supplierId: string;
-  number: string | null;
-  status: string;
-  lines: number;
-  totalValue: number;
-  error?: string;
-}
-
-/** Creates one draft PO per supplier. A Zoho failure for one supplier doesn't stop the others. */
-export async function createDraftPOs(user: User): Promise<CreatedPo[]> {
-  const { lines, dataAsOf } = await readyLines();
-  if (!lines.length) throw new Error("No approved lines waiting for a purchase order.");
-  const groups = groupByVendor(lines, await vendorMap(), process.env.ZOHO_DEFAULT_VENDOR_ID);
-  const db = await getDb();
-  const mode = integrationMode("zoho");
-  const out: CreatedPo[] = [];
   for (const g of groups) {
-    const poLines = g.lines.map((l) => ({ skuId: l.skuId, name: l.name, quantity: l.quantity, rate: l.unitCost ?? 0, source: l.source }));
-    const [po] = await db
-      .insert(schema.purchaseOrders)
-      .values({ vendorId: g.supplierId, mode, status: "pending_push", lines: poLines, totalValue: g.totalValue, dataAsOf, createdBy: user.name })
-      .returning({ id: schema.purchaseOrders.id });
-    // Claim the lines first so a second click can't put them on another PO.
-    const recIds = g.lines.filter((l) => l.source === "recommendation").map((l) => l.id);
-    const exIds = g.lines.filter((l) => l.source === "exception").map((l) => l.id);
-    if (recIds.length) await db.update(schema.recommendations).set({ purchaseOrderId: po.id }).where(inArray(schema.recommendations.id, recIds));
-    if (exIds.length) await db.update(schema.exceptions).set({ purchaseOrderId: po.id }).where(inArray(schema.exceptions.id, exIds));
-    try {
-      const r = await createDraftPurchaseOrder({
-        vendorId: g.zohoVendorId,
-        referenceNumber: `FR-PO-${po.id}`,
-        date: todayIST(),
-        notes: `Draft from Freshroots demand planning. Approved by ${user.name}; data as of ${dataAsOf}.${g.placeholderPrices ? " Rates are placeholder costs." : ""}`,
-        lines: g.lines.map((l) => ({ skuId: l.skuId, zohoItemId: l.zohoItemId, name: l.name, quantity: l.quantity, rate: l.unitCost ?? 0 })),
-      });
-      await db
-        .update(schema.purchaseOrders)
-        .set({ status: r.status, zohoPurchaseOrderId: r.purchaseOrderId, zohoPurchaseOrderNumber: r.purchaseOrderNumber })
-        .where(eq(schema.purchaseOrders.id, po.id));
-      out.push({ id: po.id, supplierId: g.supplierId, number: r.purchaseOrderNumber, status: r.status, lines: g.lines.length, totalValue: g.totalValue });
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      await db.update(schema.purchaseOrders).set({ status: "failed", error: msg }).where(eq(schema.purchaseOrders.id, po.id));
-      out.push({ id: po.id, supplierId: g.supplierId, number: null, status: "failed", lines: g.lines.length, totalValue: g.totalValue, error: msg });
-    }
+    const total = g.lines.reduce((s, l) => s + l.qty * l.rate, 0);
+    const [po] = await db.insert(schema.purchaseOrders).values({
+      runId: run.id, supplierId: g.supplierId, zohoVendorId: g.vendorId, mode: zoho.mode, status: "creating",
+      total, dataAgeDays, createdBy: by,
+    }).returning();
+    await db.insert(schema.poLines).values(g.lines.map((l) => ({ poId: po.id, runItemId: l.itemId, skuId: l.skuId, qty: l.qty, rate: l.rate })));
+    // Claim the lines first so a second click can't order them again.
+    await db.update(schema.runItems).set({ poId: po.id }).where(inArray(schema.runItems.id, g.lines.map((l) => l.itemId)));
+    const ok = await pushToZoho(db, po.id, g.vendorId, g.lines, run.id, run.dataThrough);
+    if (ok) created.push(po.id);
+    else failed++;
   }
-  return out;
+
+  if (created.length) await notifyProcurement(db, created);
+  return { created: created.length, failed, pos: created };
 }
 
-/** Retry a failed push (same PO, same lines). */
-export async function retryPurchaseOrder(id: number, user: User) {
-  const db = await getDb();
-  const [po] = await db.select().from(schema.purchaseOrders).where(eq(schema.purchaseOrders.id, id));
-  if (!po || po.status !== "failed") throw new Error("Only a failed PO can be retried.");
-  const map = await vendorMap();
-  const skuRows = await db.select().from(schema.skus);
-  const sku = new Map(skuRows.map((s) => [s.skuId, s]));
-  const lines = po.lines as { skuId: string; name: string; quantity: number; rate: number }[];
+async function pushToZoho(db: Db, poId: number, vendorId: string | null, lines: OrderLine[], runId: number, dataThrough: string | null) {
+  const zoho = zohoAdapter(db);
+  if (!vendorId) {
+    await db.update(schema.purchaseOrders).set({ status: "failed", error: "No Zoho vendor for this supplier: map it below or set ZOHO_DEFAULT_VENDOR_ID." }).where(eq(schema.purchaseOrders.id, poId));
+    return false;
+  }
+  const placeholder = lines.some((l) => l.placeholderPrice);
   try {
-    const r = await createDraftPurchaseOrder({
-      vendorId: map[po.vendorId] || process.env.ZOHO_DEFAULT_VENDOR_ID || po.vendorId,
-      referenceNumber: `FR-PO-${po.id}`,
-      date: todayIST(),
-      notes: `Draft from Freshroots demand planning (retry by ${user.name}); data as of ${po.dataAsOf}.`,
-      lines: lines.map((l) => ({ ...l, zohoItemId: sku.get(l.skuId)?.zohoItemId })),
+    const res = await zoho.createDraftPurchaseOrder({
+      vendorId,
+      date: todayIst(),
+      reference: `FR-RUN${runId}-PO${poId}`,
+      notes: `Draft from Freshroots demand planning, run #${runId} (sales data through ${dataThrough}). Approved by the demand planner; procurement to confirm.${placeholder ? " Rates are placeholder costs — check before issuing." : ""}`,
+      lines: lines.map<PoLineInput>((l) => ({ skuId: l.skuId, name: l.name, unit: l.unit, qty: l.qty, rate: l.rate, zohoItemId: l.zohoItemId })),
     });
-    await db
-      .update(schema.purchaseOrders)
-      .set({ status: r.status, error: null, mode: r.mode, zohoPurchaseOrderId: r.purchaseOrderId, zohoPurchaseOrderNumber: r.purchaseOrderNumber })
-      .where(eq(schema.purchaseOrders.id, id));
+    await db.update(schema.purchaseOrders).set({ status: res.status || "draft", zohoPoId: res.id, zohoPoNumber: res.number, zohoVendorId: vendorId, error: null })
+      .where(eq(schema.purchaseOrders.id, poId));
+    return true;
   } catch (err) {
-    await db.update(schema.purchaseOrders).set({ error: err instanceof Error ? err.message : String(err) }).where(eq(schema.purchaseOrders.id, id));
-    throw err;
+    await db.update(schema.purchaseOrders).set({ status: "failed", error: err instanceof Error ? err.message : String(err) }).where(eq(schema.purchaseOrders.id, poId));
+    return false;
   }
 }
 
-/** Pull each open PO's status from Zoho (procurement confirms there). */
-export async function syncStatuses() {
-  const db = await getDb();
-  const open = await db
-    .select()
-    .from(schema.purchaseOrders)
-    .where(and(sql`${schema.purchaseOrders.zohoPurchaseOrderId} is not null`, sql`${schema.purchaseOrders.status} not in ('failed', 'cancelled', 'billed', 'closed')`));
+/** Retries a failed PO with the current vendor map. */
+export async function retryPurchaseOrder(db: Db, poId: number) {
+  const [po] = await db.select().from(schema.purchaseOrders).where(eq(schema.purchaseOrders.id, poId));
+  if (!po || po.status !== "failed") throw new Error("Only failed purchase orders can be retried.");
+  const [run] = await db.select().from(schema.runs).where(eq(schema.runs.id, po.runId));
+  const rows = await db.select({ line: schema.poLines, sku: schema.skus }).from(schema.poLines)
+    .innerJoin(schema.skus, eq(schema.skus.id, schema.poLines.skuId)).where(eq(schema.poLines.poId, poId));
+  const lines: OrderLine[] = rows.map(({ line, sku }) => ({
+    itemId: line.runItemId, skuId: sku.id, name: sku.name, unit: sku.unit, supplierId: po.supplierId, qty: line.qty, rate: line.rate ?? 0,
+    zohoItemId: sku.zohoItemId, placeholderPrice: sku.priceSource === "placeholder",
+  }));
+  const vendorId = (await getVendorMap(db))[po.supplierId] || process.env.ZOHO_DEFAULT_VENDOR_ID?.trim() || (mode("zoho") === "live" ? null : `MOCK-VENDOR-${po.supplierId}`);
+  await db.update(schema.purchaseOrders).set({ mode: mode("zoho") }).where(eq(schema.purchaseOrders.id, poId));
+  const ok = await pushToZoho(db, poId, vendorId, lines, po.runId, run?.dataThrough ?? null);
+  if (ok) await notifyProcurement(db, [poId]);
+  return ok;
+}
+
+/** Pulls each open draft's status back from Zoho (procurement issues it there). Run by the daily job. */
+export async function syncPurchaseOrderStatuses(db: Db) {
+  const open = await db.select().from(schema.purchaseOrders).where(eq(schema.purchaseOrders.status, "draft"));
+  const zoho = zohoAdapter(db);
   let changed = 0;
   for (const po of open) {
-    const status = await getPurchaseOrderStatus(po.zohoPurchaseOrderId!);
-    if (status !== po.status) {
-      await db.update(schema.purchaseOrders).set({ status }).where(eq(schema.purchaseOrders.id, po.id));
-      changed++;
+    if (!po.zohoPoId || po.mode !== zoho.mode) continue;
+    try {
+      const status = await zoho.getPurchaseOrderStatus(po.zohoPoId);
+      if (status && status !== po.status) {
+        await db.update(schema.purchaseOrders).set({ status }).where(eq(schema.purchaseOrders.id, po.id));
+        changed++;
+      }
+    } catch {
+      // Leave the status as is; the next daily run tries again.
     }
   }
   return changed;
 }
 
-/** Mock mode only: stand in for procurement confirming the draft inside Zoho. */
-export async function confirmMockPurchaseOrder(id: number) {
-  const db = await getDb();
-  const [po] = await db.select().from(schema.purchaseOrders).where(eq(schema.purchaseOrders.id, id));
-  if (!po?.zohoPurchaseOrderId?.startsWith("mock-")) throw new Error("Only mock POs can be confirmed here — confirm real ones in Zoho.");
-  await db
-    .update(schema.mockZohoPurchaseOrders)
-    .set({ status: "issued" })
-    .where(eq(schema.mockZohoPurchaseOrders.id, Number(po.zohoPurchaseOrderId.slice(5))));
-  await db.update(schema.purchaseOrders).set({ status: "issued" }).where(eq(schema.purchaseOrders.id, id));
+/** Mock mode only: stands in for procurement confirming the draft inside Zoho. */
+export async function simulateProcurementConfirm(db: Db, poId: number) {
+  const [po] = await db.select().from(schema.purchaseOrders).where(eq(schema.purchaseOrders.id, poId));
+  if (!po || po.mode !== "mock" || !po.zohoPoId) throw new Error("Only mock purchase orders can be confirmed here.");
+  await db.update(schema.mockZohoPurchaseOrders).set({ status: "issued" }).where(eq(schema.mockZohoPurchaseOrders.id, Number(po.zohoPoId.replace("mock-", ""))));
+  await db.update(schema.purchaseOrders).set({ status: "issued" }).where(eq(schema.purchaseOrders.id, poId));
 }
 
-export async function purchaseOrders(limit = 30) {
-  const db = await getDb();
-  return db.select().from(schema.purchaseOrders).orderBy(desc(schema.purchaseOrders.id)).limit(limit);
-}
-
-export async function zohoLog(limit = 20) {
-  const db = await getDb();
-  return db.select().from(schema.zohoApiLog).orderBy(desc(schema.zohoApiLog.id)).limit(limit);
+export async function listPurchaseOrders(db: Db) {
+  const pos = await db.select().from(schema.purchaseOrders).orderBy(desc(schema.purchaseOrders.id)).limit(50);
+  const lines = pos.length
+    ? await db.select({ line: schema.poLines, name: schema.skus.name }).from(schema.poLines)
+      .innerJoin(schema.skus, eq(schema.skus.id, schema.poLines.skuId))
+      .where(inArray(schema.poLines.poId, pos.map((p) => p.id)))
+    : [];
+  return pos.map((po) => ({ ...po, lines: lines.filter((l) => l.line.poId === po.id) }));
 }

@@ -9,12 +9,15 @@
     "start": "next start",
     "lint": "tsc --noEmit",
     "test": "vitest run",
-    "seed": "tsx scripts/seed.ts",
-    "zoho:sync-items": "tsx scripts/zoho-sync-items.ts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx scripts/db-migrate.ts",
+    "seed": "tsx scripts/seed.ts",
     "forecast": "tsx scripts/forecast.ts",
-    "zoho:refresh-token": "tsx scripts/zoho-get-refresh-token.ts"
+    "tracker": "tsx scripts/tracker.ts",
+    "zoho:refresh-token": "tsx scripts/zoho-get-refresh-token.ts",
+    "zoho:verify": "tsx scripts/zoho-verify.ts",
+    "zoho:sync-items": "tsx scripts/zoho-sync-items.ts",
+    "check:integrations": "tsx scripts/check-integrations.ts"
   },
   "dependencies": {
     "@electric-sql/pglite": "0.5.11",

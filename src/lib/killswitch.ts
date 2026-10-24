@@ -1,84 +1,94 @@
-import { monthlyLossBand, type Baseline } from "@/lib/config/baseline";
+import { and, desc, eq, inArray } from "drizzle-orm";
+import { schema, type Db } from "@/db";
+import { baselineMonthly, getBaseline, type Baseline } from "@/lib/settings";
+import { inr } from "@/lib/format";
 
 /**
- * Pre-build decision #5 — kill criteria.
- *  Early:   Raghav edits or rejects > 50% of decided recommendations over the last 4 runs → red, "halt and re-evaluate rules".
- *  Outcome: monthly losses above ₹11 L for 2 consecutive months → red, "stop, run RCA, fix, redeploy".
- * Amber is the warning band before red; grey means not enough data yet.
+ * Pre-build decision #5, kill criteria:
+ *  - Early: Raghav edits or rejects > 50% of recommendations over the last 4 runs → red ("halt and re-evaluate rules").
+ *  - Outcome: monthly losses above the top of the baseline (₹11 L) for 2 consecutive months → red ("stop, RCA, fix, redeploy").
+ * Plus payback: ₹15 L build cost ÷ monthly savings vs the baseline midpoint.
  */
 
-export type Status = "green" | "amber" | "red" | "grey";
+export type Light = "green" | "amber" | "red" | "grey";
 
-export interface RunDecisions {
-  runId: number;
-  decided: number; // approved + edited + rejected
-  overridden: number; // edited + rejected
+export interface RunOverrides { runId: number; decided: number; overridden: number }
+export interface MonthLoss { yearMonth: string; total: number }
+
+export interface KillSwitch {
+  overall: Light;
+  early: { status: Light; pct: number | null; decided: number; overridden: number; runs: number };
+  outcome: { status: Light; months: MonthLoss[]; limit: number };
+  payback: { months: number | null; savingsPerMonth: number | null; avgLoss: number | null; baselineMid: number };
+  messages: string[];
 }
 
-export interface MonthLoss {
-  month: string; // YYYY-MM
-  total: number; // stockout loss + overstock write-off, ₹
+const rank: Record<Light, number> = { grey: 0, green: 1, amber: 2, red: 3 };
+export const worst = (...ls: Light[]) => ls.reduce((a, b) => (rank[b] > rank[a] ? b : a), "grey" as Light);
+
+/** Pure; exported for tests. runs = most recent first, only runs where Raghav decided something. */
+export function earlyStatus(runs: RunOverrides[], b: Baseline) {
+  const window = runs.slice(0, b.earlyRuns);
+  const decided = window.reduce((s, r) => s + r.decided, 0);
+  const overridden = window.reduce((s, r) => s + r.overridden, 0);
+  if (!decided) return { status: "grey" as Light, pct: null, decided, overridden, runs: window.length };
+  const pct = (overridden / decided) * 100;
+  const status: Light = pct > b.earlyRedPct ? "red" : pct > b.earlyAmberPct ? "amber" : "green";
+  return { status, pct, decided, overridden, runs: window.length };
 }
 
-const RANK: Record<Status, number> = { grey: 0, green: 1, amber: 2, red: 3 };
-export const worst = (...s: Status[]) => s.reduce((a, b) => (RANK[b] > RANK[a] ? b : a), "grey" as Status);
+const nextMonth = (ym: string) => {
+  const [y, m] = ym.split("-").map(Number);
+  return m === 12 ? `${y + 1}-01` : `${y}-${String(m + 1).padStart(2, "0")}`;
+};
 
-export function earlyKill(runs: RunDecisions[], b: Baseline) {
-  const ks = b.killSwitch;
-  const counted = runs.filter((r) => r.decided > 0).slice(0, ks.overrideLookbackRuns); // newest first
-  const decided = counted.reduce((a, r) => a + r.decided, 0);
-  const overridden = counted.reduce((a, r) => a + r.overridden, 0);
-  const ratePct = decided ? Math.round((overridden / decided) * 1000) / 10 : null;
-  const amberAt = ks.overrideRatePct * 0.7;
-  const status: Status = ratePct === null ? "grey" : ratePct > ks.overrideRatePct ? "red" : ratePct > amberAt ? "amber" : "green";
-  const message = {
-    grey: "No decisions yet.",
-    green: "Raghav mostly agrees with the rules.",
-    amber: `Override rate is above ${amberAt}% — look at the reasons.`,
-    red: "Halt and re-evaluate the rules.",
-  }[status];
-  return { status, ratePct, decided, overridden, runsCounted: counted.length, limitPct: ks.overrideRatePct, message };
+/** Pure; months = oldest first. Red needs the latest N months to be consecutive and all above the limit. */
+export function outcomeStatus(months: MonthLoss[], b: Baseline): Light {
+  if (!months.length) return "grey";
+  const recent = months.slice(-b.outcomeMonths);
+  const consecutive = recent.every((m, i) => i === 0 || nextMonth(recent[i - 1].yearMonth) === m.yearMonth);
+  if (recent.length === b.outcomeMonths && consecutive && recent.every((m) => m.total > b.outcomeMonthlyLimit)) return "red";
+  if (months[months.length - 1].total > b.outcomeMonthlyLimit) return "amber";
+  return "green";
 }
 
-export function outcomeKill(months: MonthLoss[], b: Baseline) {
-  const ks = b.killSwitch;
-  const sorted = [...months].sort((a, c) => a.month.localeCompare(c.month));
-  const recent = sorted.slice(-ks.consecutiveMonths);
-  const above = (m: MonthLoss) => m.total > ks.monthlyLossLimit;
-  const status: Status = !sorted.length
-    ? "grey"
-    : recent.length === ks.consecutiveMonths && recent.every(above)
-      ? "red"
-      : above(sorted[sorted.length - 1])
-        ? "amber"
-        : "green";
-  const message = {
-    grey: "No monthly losses entered yet.",
-    green: "Losses are within the limit.",
-    amber: "Last month was above the limit — one more month triggers the kill switch.",
-    red: "Stop, run a root-cause analysis, fix, redeploy.",
-  }[status];
-  return { status, limit: ks.monthlyLossLimit, latest: sorted.at(-1) ?? null, message };
-}
-
-/** Savings vs the baseline midpoint, averaged over up to the last 3 months, and months to repay the build. */
+/** Pure. Average of the last (up to) 3 months vs the baseline midpoint. */
 export function payback(months: MonthLoss[], b: Baseline) {
-  const band = monthlyLossBand(b);
-  const recent = [...months].sort((a, c) => a.month.localeCompare(c.month)).slice(-3);
-  if (!recent.length) return { baselineMonthly: band.mid, avgLoss: null, monthlySavings: null, paybackMonths: null, buildCost: b.buildCost };
-  const avgLoss = recent.reduce((a, m) => a + m.total, 0) / recent.length;
-  const monthlySavings = band.mid - avgLoss;
-  return {
-    baselineMonthly: band.mid,
-    avgLoss,
-    monthlySavings,
-    paybackMonths: monthlySavings > 0 ? Math.round((b.buildCost / monthlySavings) * 10) / 10 : null,
-    buildCost: b.buildCost,
-  };
+  const baselineMid = baselineMonthly(b).mid;
+  const recent = months.slice(-3);
+  if (!recent.length) return { months: null, savingsPerMonth: null, avgLoss: null, baselineMid };
+  const avgLoss = recent.reduce((s, m) => s + m.total, 0) / recent.length;
+  const savingsPerMonth = baselineMid - avgLoss;
+  return { months: savingsPerMonth > 0 ? b.buildCost / savingsPerMonth : null, savingsPerMonth, avgLoss, baselineMid };
 }
 
-export function killSwitch(runs: RunDecisions[], months: MonthLoss[], b: Baseline) {
-  const early = earlyKill(runs, b);
-  const outcome = outcomeKill(months, b);
-  return { overall: worst(early.status, outcome.status), early, outcome, payback: payback(months, b) };
+export async function overridesByRun(db: Db): Promise<RunOverrides[]> {
+  const runs = await db.select({ id: schema.runs.id }).from(schema.runs).where(eq(schema.runs.status, "done")).orderBy(desc(schema.runs.id)).limit(50);
+  if (!runs.length) return [];
+  const items = await db.select({ runId: schema.runItems.runId, decision: schema.runItems.decision }).from(schema.runItems)
+    .where(and(inArray(schema.runItems.runId, runs.map((r) => r.id)), eq(schema.runItems.queue, "review")));
+  return runs.map((r) => {
+    const mine = items.filter((i) => i.runId === r.id && i.decision !== "pending");
+    return { runId: r.id, decided: mine.length, overridden: mine.filter((i) => i.decision !== "approved").length };
+  }).filter((r) => r.decided > 0);
+}
+
+export async function monthlyTotals(db: Db): Promise<MonthLoss[]> {
+  const rows = await db.select().from(schema.monthlyLosses).orderBy(schema.monthlyLosses.yearMonth);
+  return rows.map((r) => ({ yearMonth: r.yearMonth, total: r.stockoutLoss + r.overstockWriteoff }));
+}
+
+export async function computeKillSwitch(db: Db): Promise<KillSwitch> {
+  const b = await getBaseline(db);
+  const early = earlyStatus(await overridesByRun(db), b);
+  const months = await monthlyTotals(db);
+  const outcome = { status: outcomeStatus(months, b), months, limit: b.outcomeMonthlyLimit };
+  const messages: string[] = [];
+  if (early.status === "red" || early.status === "amber")
+    messages.push(`Raghav edited or rejected ${Math.round(early.pct!)}% of ${early.decided} recommendations over the last ${early.runs} run(s) (red above ${b.earlyRedPct}%).`);
+  if (outcome.status === "red")
+    messages.push(`Losses above ${inr(b.outcomeMonthlyLimit)}/month for ${b.outcomeMonths} consecutive months (latest ${inr(months[months.length - 1].total)}).`);
+  else if (outcome.status === "amber")
+    messages.push(`Latest month's losses ${inr(months[months.length - 1].total)} are above ${inr(b.outcomeMonthlyLimit)}.`);
+  return { overall: worst(early.status, outcome.status), early, outcome, payback: payback(months, b), messages };
 }

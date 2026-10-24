@@ -1,165 +1,111 @@
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
-import { getDb, schema } from "@/lib/db";
-import { getActiveRules } from "@/lib/settings";
-import { computeMetrics } from "@/lib/rules/engine";
-import { loadHistory, loadSkus, loadStock, seriesUpTo } from "@/lib/rules/data";
-import { monthOfWeek } from "@/lib/seed/parse";
-import type { MonthLoss, RunDecisions } from "@/lib/killswitch";
-
-/** A SKU selling this far off its forecast shows up as an early warning. */
-export const TRACKER_ALERT_PCT = 25;
-
-export const todayIST = () => new Date(Date.now() + 5.5 * 3_600_000).toISOString().slice(0, 10);
+import { and, desc, eq, lt, lte } from "drizzle-orm";
+import { schema, type Db } from "@/db";
+import { addDays, todayIst } from "@/lib/dates";
+import { computeKillSwitch, type KillSwitch } from "@/lib/killswitch";
+import { loadEngineData, latestStock, latestSalesWeek } from "@/lib/forecast/inputs";
+import { evaluateSku } from "@/lib/rules/engine";
+import { getBaseline, getRules } from "@/lib/settings";
+import { notifyKillSwitchRed } from "@/lib/notify";
+import { syncPurchaseOrderStatuses } from "@/lib/purchase-orders";
 
 /**
- * Daily early warning: for the latest sales week, actual units vs the forecast the rules made for that week.
- * Uses the forecast a run saved for that week; if no run planned it (e.g. seed history), re-runs the rules on
- * the history before it. Also records a stockout incident when a selling SKU's stock is 0.
+ * The daily early warning (07:00 IST): actual units in the latest loaded week vs what the plan expected for it,
+ * per SKU. SAP sales arrive weekly, so the numbers move when a new week is loaded; the check itself runs daily.
+ * Also: auto-detects stockouts, syncs PO statuses from Zoho and recomputes the kill switch.
  */
-export async function updateTracker(date = todayIST()) {
-  const db = await getDb();
-  const { config } = await getActiveRules();
-  const [history, skus, stock] = await Promise.all([loadHistory(db), loadSkus(db, config), loadStock(db)]);
-  const last = history.weeks.length - 1;
-  if (last < 1) return { date, week: null, rows: 0, alerts: 0, incidents: 0 };
-  const week = history.weeks[last];
-  const planningMonth = Number(monthOfWeek(week).slice(5, 7));
 
-  const saved = await db
-    .select()
-    .from(schema.runForecasts)
-    .where(eq(schema.runForecasts.planningWeek, week))
-    .orderBy(desc(schema.runForecasts.runId));
-  const fromRun = new Map<string, number>();
-  for (const f of saved) if (!fromRun.has(f.skuId)) fromRun.set(f.skuId, f.expectedWeekly);
+export type TrackStatus = "on_track" | "above" | "below" | "stockout";
 
-  const rows: (typeof schema.dailyTracker.$inferInsert)[] = [];
-  const incidents: (typeof schema.stockoutIncidents.$inferInsert)[] = [];
-  for (const sku of skus) {
-    const series = history.bySku.get(sku.skuId);
-    const actual = series?.[last];
-    if (series == null || actual == null) continue;
-    let forecast = fromRun.get(sku.skuId);
-    let source = "run";
-    if (forecast === undefined) {
-      const past = seriesUpTo(series, last - 1);
-      if (!past.length) continue;
-      const m = computeMetrics({ skuId: sku.skuId, isPerishable: sku.isPerishable, standardOrderQty: sku.standardOrderQty, weeklyUnits: past, stockOnHand: 0 }, config, planningMonth);
-      forecast = m.expectedWeekly;
-      source = "replayed";
-    }
-    const onHand = stock.bySku.get(sku.skuId) ?? null;
-    rows.push({
-      date, skuId: sku.skuId, week, forecastSource: source,
-      forecastUnits: forecast, actualUnits: actual, stockOnHand: onHand,
-      deviationPct: forecast > 0 ? Math.round((actual / forecast - 1) * 1000) / 10 : null,
-    });
-    if (onHand === 0 && actual > 0 && stock.date) {
-      // Out of stock while still selling: about a week of demand is at risk until the reorder lands.
-      incidents.push({
-        date: stock.date, skuId: sku.skuId, source: "detected", estLostUnits: Math.round(forecast),
-        estLostValue: sku.unitPrice != null ? Math.round(forecast * sku.unitPrice) : null,
-        note: `Stock 0 on ${stock.date}; estimate = one week of forecast demand${sku.priceSource === "placeholder" ? " (placeholder price)" : ""}.`,
+/** Pure; exported for tests. */
+export function classify(actual: number, forecast: number, stock: number | null, thresholdPct: number): { status: TrackStatus; variancePct: number | null } {
+  const variancePct = forecast > 0 ? ((actual - forecast) / forecast) * 100 : actual > 0 ? null : 0;
+  if (stock === 0 && (actual > 0 || forecast > 0)) return { status: "stockout", variancePct };
+  if (variancePct == null) return { status: "above", variancePct };
+  if (variancePct > thresholdPct) return { status: "above", variancePct };
+  if (variancePct < -thresholdPct) return { status: "below", variancePct };
+  return { status: "on_track", variancePct };
+}
+
+/**
+ * The forecast for a week: the expectedWeekly of the latest run made on data before that week. Weeks no run
+ * planned (e.g. history loaded at once) are re-planned by running the rules on the weeks before them.
+ */
+async function forecastsFor(db: Db, week: string): Promise<{ bySku: Map<string, number>; source: string }> {
+  const [run] = await db.select().from(schema.runs)
+    .where(and(eq(schema.runs.status, "done"), lt(schema.runs.dataThrough, week)))
+    .orderBy(desc(schema.runs.id)).limit(1);
+  if (run) {
+    const items = await db.select({ skuId: schema.runItems.skuId, f: schema.runItems.forecastWeekly }).from(schema.runItems).where(eq(schema.runItems.runId, run.id));
+    return { bySku: new Map(items.map((i) => [i.skuId, i.f])), source: `run #${run.id}` };
+  }
+  const rules = await getRules(db);
+  const data = await loadEngineData(db, { throughWeek: addDays(week, -7) });
+  const bySku = new Map(data.inputs.filter((i) => i.weekly.length).map((i) => [i.skuId, evaluateSku(i, rules.config, week).metrics.expectedWeekly]));
+  return { bySku, source: "rules re-run on prior weeks" };
+}
+
+export async function runTracker(db: Db, opts: { today?: string; notify?: boolean } = {}) {
+  const today = opts.today ?? todayIst();
+  const week = await latestSalesWeek(db);
+  const baseline = await getBaseline(db);
+  let checked = 0;
+  let incidents = 0;
+  let forecastSource = "";
+
+  if (week) {
+    const { bySku: forecasts, source } = await forecastsFor(db, week);
+    forecastSource = source;
+    const actualRows = await db.select().from(schema.weeklySales).where(eq(schema.weeklySales.weekStart, week));
+    const actual = new Map<string, number>();
+    for (const r of actualRows) actual.set(r.skuId, (actual.get(r.skuId) ?? 0) + r.units);
+    const { stock } = await latestStock(db);
+    const skus = await db.select().from(schema.skus).where(eq(schema.skus.active, true));
+
+    for (const sku of skus) {
+      const f = forecasts.get(sku.id);
+      if (f == null) continue;
+      const a = actual.get(sku.id) ?? 0;
+      const s = stock.get(sku.id) ?? null;
+      const { status, variancePct } = classify(a, f, s, baseline.trackerVariancePct);
+      const row = {
+        checkDate: today, skuId: sku.id, weekStart: week, actualUnits: a, forecastUnits: f, variancePct,
+        stockUnits: s, weeksCover: s != null && f > 0 ? s / f : null, status,
+      };
+      await db.insert(schema.trackerChecks).values(row).onConflictDoUpdate({
+        target: [schema.trackerChecks.checkDate, schema.trackerChecks.skuId],
+        set: { weekStart: row.weekStart, actualUnits: a, forecastUnits: f, variancePct, stockUnits: s, weeksCover: row.weeksCover, status },
       });
+      checked++;
+
+      // A SKU out of stock while there is demand: log one incident per SKU-week, valued at a week of forecast sales.
+      if (status === "stockout") {
+        const [existing] = await db.select().from(schema.stockoutIncidents)
+          .where(and(eq(schema.stockoutIncidents.skuId, sku.id), eq(schema.stockoutIncidents.weekStart, week), eq(schema.stockoutIncidents.source, "auto")));
+        if (!existing) {
+          await db.insert(schema.stockoutIncidents).values({
+            skuId: sku.id, weekStart: week, source: "auto", lostUnits: f, lostValue: f * (sku.unitPrice ?? 0),
+            note: `Stock 0 with ${Math.round(f)}/wk expected${sku.priceSource === "placeholder" ? " (value uses placeholder price)" : ""}`,
+          });
+          incidents++;
+        }
+      }
     }
   }
 
-  await db.delete(schema.dailyTracker).where(eq(schema.dailyTracker.date, date));
-  if (rows.length) await db.insert(schema.dailyTracker).values(rows);
-  let newIncidents = 0;
-  for (const inc of incidents) {
-    const [exists] = await db
-      .select({ id: schema.stockoutIncidents.id })
-      .from(schema.stockoutIncidents)
-      .where(and(eq(schema.stockoutIncidents.date, inc.date), eq(schema.stockoutIncidents.skuId, inc.skuId), eq(schema.stockoutIncidents.source, "detected")));
-    if (!exists) {
-      await db.insert(schema.stockoutIncidents).values(inc);
-      newIncidents++;
-    }
-  }
-  const alerts = rows.filter((r) => r.deviationPct != null && Math.abs(r.deviationPct) > TRACKER_ALERT_PCT).length;
-  return { date, week, rows: rows.length, alerts, incidents: newIncidents };
+  const poUpdates = await syncPurchaseOrderStatuses(db);
+  const ks = await recordKillSwitch(db, today, opts.notify ?? true);
+  return { today, week, checked, incidents, forecastSource, poUpdates, killSwitch: ks.overall, alerted: ks.alerted };
 }
 
-// ---------------------------------------------------------------------------
-// Reads for the tracker page and the kill switch
-// ---------------------------------------------------------------------------
-
-export async function latestTracker() {
-  const db = await getDb();
-  const [d] = await db.select({ d: sql<string | null>`max(${schema.dailyTracker.date})::text` }).from(schema.dailyTracker);
-  if (!d.d) return { date: null, rows: [] };
-  const rows = await db
-    .select({ t: schema.dailyTracker, name: schema.skus.name })
-    .from(schema.dailyTracker)
-    .leftJoin(schema.skus, eq(schema.skus.skuId, schema.dailyTracker.skuId))
-    .where(eq(schema.dailyTracker.date, d.d))
-    .orderBy(sql`abs(coalesce(${schema.dailyTracker.deviationPct}, 0)) desc`);
-  return { date: d.d, rows: rows.map((r) => ({ ...r.t, name: r.name })) };
-}
-
-/** Decided / overridden counts per run, newest first — the early kill switch input. */
-export async function decisionsByRun(): Promise<RunDecisions[]> {
-  const db = await getDb();
-  const rows = (
-    await db.execute<{ run_id: number; decided: number; overridden: number }>(sql`
-      select run_id,
-             count(*) filter (where status <> 'pending')::int as decided,
-             count(*) filter (where status in ('edited', 'rejected'))::int as overridden
-      from recommendations group by run_id order by run_id desc`)
-  ).rows;
-  return rows.map((r) => ({ runId: r.run_id, decided: r.decided, overridden: r.overridden }));
-}
-
-export async function monthlyLossRows() {
-  const db = await getDb();
-  return db.select().from(schema.monthlyLosses).orderBy(schema.monthlyLosses.month);
-}
-
-export const toMonthLoss = (rows: Awaited<ReturnType<typeof monthlyLossRows>>): MonthLoss[] =>
-  rows.map((r) => ({ month: r.month, total: r.stockoutLoss + r.overstockWriteoff }));
-
-/** Every edit / reject with its reason, and how old the data was when Raghav decided. */
-export async function overrideLog(limit = 50) {
-  const db = await getDb();
-  const rows = await db
-    .select({ rec: schema.recommendations, run: schema.forecastRuns })
-    .from(schema.recommendations)
-    .innerJoin(schema.forecastRuns, eq(schema.forecastRuns.id, schema.recommendations.runId))
-    .where(inArray(schema.recommendations.status, ["edited", "rejected"]))
-    .orderBy(desc(schema.recommendations.decidedAt))
-    .limit(limit);
-  return rows.map(({ rec, run }) => ({ ...rec, dataAsOf: run.dataAsOf, dataAgeDays: dataAgeAt(run.dataAsOf, rec.decidedAt) }));
-}
-
-/** Days between the end of the data and the decision. */
-export const dataAgeAt = (dataAsOf: string | null, at: Date | null) =>
-  dataAsOf && at ? Math.floor((at.getTime() - Date.parse(`${dataAsOf}T23:59:59+05:30`)) / 86_400_000) + 1 : null;
-
-export async function decisionDataAge() {
-  const db = await getDb();
-  const rows = await db
-    .select({ at: schema.recommendations.decidedAt, asOf: schema.forecastRuns.dataAsOf })
-    .from(schema.recommendations)
-    .innerJoin(schema.forecastRuns, eq(schema.forecastRuns.id, schema.recommendations.runId))
-    .where(sql`${schema.recommendations.decidedAt} is not null`);
-  const ages = rows.map((r) => dataAgeAt(r.asOf, r.at)).filter((x): x is number => x !== null);
-  return { n: ages.length, avg: ages.length ? ages.reduce((a, b) => a + b, 0) / ages.length : null, max: ages.length ? Math.max(...ages) : null };
-}
-
-export async function incidents(limit = 30) {
-  const db = await getDb();
-  return db.select().from(schema.stockoutIncidents).orderBy(desc(schema.stockoutIncidents.date), desc(schema.stockoutIncidents.id)).limit(limit);
-}
-
-export async function stockoutFrequency() {
-  const db = await getDb();
-  return (
-    await db.execute<{ sku_id: string; n: number }>(sql`select sku_id, count(*)::int as n from stockout_incidents group by sku_id order by n desc, sku_id limit 10`)
-  ).rows;
-}
-
-export async function complaints(limit = 30) {
-  const db = await getDb();
-  return db.select().from(schema.distributorComplaints).orderBy(desc(schema.distributorComplaints.date), desc(schema.distributorComplaints.id)).limit(limit);
+/** Stores today's kill-switch light; emails Deepa only when it turns red (not every day it stays red). */
+async function recordKillSwitch(db: Db, today: string, notify: boolean): Promise<KillSwitch & { alerted: boolean }> {
+  const ks = await computeKillSwitch(db);
+  // The latest stored light, today's included, so a second run on the same day doesn't alert twice.
+  const [prev] = await db.select().from(schema.killSwitchHistory).where(lte(schema.killSwitchHistory.checkDate, today))
+    .orderBy(desc(schema.killSwitchHistory.checkDate)).limit(1);
+  await db.insert(schema.killSwitchHistory).values({ checkDate: today, overall: ks.overall, early: ks.early.status, outcome: ks.outcome.status, detail: ks.messages })
+    .onConflictDoUpdate({ target: schema.killSwitchHistory.checkDate, set: { overall: ks.overall, early: ks.early.status, outcome: ks.outcome.status, detail: ks.messages } });
+  const alerted = notify && ks.overall === "red" && prev?.overall !== "red";
+  if (alerted) await notifyKillSwitchRed(db, ks);
+  return { ...ks, alerted };
 }

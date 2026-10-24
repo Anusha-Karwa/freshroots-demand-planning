@@ -1,10 +1,73 @@
 @import "tailwindcss";
 
+/* Design tokens. Pages use these through Tailwind's arbitrary values, e.g. bg-[var(--surface)]. */
 :root {
-  --bg: #f7f7f5;
-  --fg: #1c1c1a;
+  color-scheme: light;
+  --bg: #f6f6f4;
+  --surface: #fcfcfb;
+  --surface-2: #f0efec;
+  --border: #e2e1dc;
+  --text: #0b0b0b;
+  --text-2: #52514e;
+  --text-3: #75746f;
+  --accent: #1f6f43;
+  --accent-ink: #ffffff;
+  --series-1: #2a78d6;
+  --series-2: #eb6834;
+  --good: #16794a;
+  --good-bg: #e3f3ea;
+  --warn: #8a5a00;
+  --warn-bg: #fdf1d6;
+  --bad: #b42318;
+  --bad-bg: #fde7e5;
+  --info-bg: #e8f0fb;
+  --mute-bg: #ecebe7;
 }
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme="light"])) {
+    color-scheme: dark;
+    --bg: #111110;
+    --surface: #1a1a19;
+    --surface-2: #232321;
+    --border: #34332f;
+    --text: #f0efec;
+    --text-2: #c3c2b7;
+    --text-3: #9b9a92;
+    --accent: #3fae73;
+    --accent-ink: #0b0b0b;
+    --series-1: #3987e5;
+    --series-2: #d95926;
+    --good: #5fd39a;
+    --good-bg: #16301f;
+    --warn: #f0b84a;
+    --warn-bg: #352a10;
+    --bad: #ff8a80;
+    --bad-bg: #3a1714;
+    --info-bg: #182638;
+    --mute-bg: #2a2a27;
+  }
+}
+
 body {
   background: var(--bg);
-  color: var(--fg);
+  color: var(--text);
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-size: 14px;
 }
+
+.num { font-variant-numeric: tabular-nums; }
+
+input, select, textarea {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 8px;
+  color: var(--text);
+}
+input[type="checkbox"] { padding: 0; }
+input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+table.data { width: 100%; border-collapse: collapse; }
+table.data th { text-align: left; font-weight: 600; color: var(--text-2); font-size: 12px; padding: 6px 8px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+table.data td { padding: 8px; border-bottom: 1px solid var(--border); vertical-align: top; }
+table.data td.r, table.data th.r { text-align: right; }

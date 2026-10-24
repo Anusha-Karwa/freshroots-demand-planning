@@ -1,160 +1,191 @@
-import type { RulesConfig } from "@/lib/config/rules";
+import { monthOf } from "@/lib/dates";
+import type { RulesConfig } from "./config";
 
 /**
- * Raghav's forecasting rules. Pure functions, no AI, no database: same inputs → same output.
- *
- * Order of evaluation (per SKU):
- *   1. Exceptions (new SKU, distributor concentration, week-on-week swing) → judgement queue, no quantity.
- *   2. Festival uplift on expected demand.
- *   3. HIGH_DEMAND, STOCKOUT_RISK, OVERSTOCK_RISK flags and the recommended quantity.
+ * Raghav's rules, as a pure function: one SKU's history in, flags + numbers out. No database, no AI.
+ * Everything a recommendation shows on screen comes from the metrics returned here.
  */
 
 export type Flag = "HIGH_DEMAND" | "STOCKOUT_RISK" | "OVERSTOCK_RISK";
-export type Action = "REORDER" | "REORDER_NOW" | "PAUSE_NEXT_ORDER";
-export type ExceptionType = "NEW_SKU" | "DISTRIBUTOR_CONCENTRATION" | "WOW_SWING" | "CONFLICTING_FLAGS" | "AI_UNUSUAL";
+export type ExceptionCode = "NEW_SKU" | "WOW_SWING" | "DISTRIBUTOR_CONCENTRATION" | "RULES_CONFLICT" | "NO_STOCK_DATA" | "AI_UNUSUAL";
+export type Action = "reorder_now" | "reorder" | "pause" | "judgement" | null;
+
+export const FLAG_LABEL: Record<Flag, string> = {
+  HIGH_DEMAND: "High demand",
+  STOCKOUT_RISK: "Stockout risk",
+  OVERSTOCK_RISK: "Overstock risk",
+};
+
+export const EXCEPTION_LABEL: Record<ExceptionCode, string> = {
+  NEW_SKU: "New SKU (short history)",
+  WOW_SWING: "Week-on-week swing",
+  DISTRIBUTOR_CONCENTRATION: "One distributor drives the change",
+  RULES_CONFLICT: "Rules disagree",
+  NO_STOCK_DATA: "No stock figure",
+  AI_UNUSUAL: "Looks unusual (AI)",
+};
 
 export interface SkuInput {
   skuId: string;
-  isPerishable: boolean;
+  perishable: boolean;
   standardOrderQty: number;
-  /** Weekly units, oldest → newest, one entry per week up to the last complete week (no gaps). */
-  weeklyUnits: number[];
-  stockOnHand: number;
-  /** Per-distributor units for the last two weeks; omit when sales are SKU-level only. */
-  distributorLastTwoWeeks?: { previous: Record<string, number>; current: Record<string, number> };
+  /** Weekly units, oldest → newest, one entry per week, ending with the latest complete week. */
+  weekly: number[];
+  /** Units by distributor for the latest and the previous week; omitted when sales are SKU-level only. */
+  lastWeekByDistributor?: Record<string, number>;
+  prevWeekByDistributor?: Record<string, number>;
+  stock: number | null;
 }
 
-export interface Metrics {
+export interface ItemMetrics {
   weeksOfHistory: number;
-  avg4: number; // average weekly units, last `recentWeeks` weeks
-  avg12: number; // average weekly units, last `baselineWeeks` weeks (fewer if history is shorter)
-  pct4v12: number | null; // % by which avg4 exceeds avg12; null when avg12 = 0
+  avgShort: number; // average of the last 4 weeks
+  avgLong: number; // average of the last 12 weeks
+  changePct: number | null; // avgShort vs avgLong
   festival: boolean;
-  uplift: number; // 1 or the festival multiplier
-  expectedWeekly: number; // avg12 × uplift — the demand cover is measured against
-  stockOnHand: number;
-  weeksOfCover: number | null; // stock ÷ expectedWeekly; null when expected demand is 0
-  coverWindow: { minWeeks: number; maxWeeks: number; perishable: boolean };
-  lastWeekUnits: number;
-  prevWeekUnits: number | null;
-  wowPct: number | null; // week-on-week change %, null when the previous week was 0 (or missing)
-  topDistributor?: { id: string; sharePct: number } | null; // biggest single share of the WoW change
+  upliftFactor: number;
+  expectedWeekly: number; // avgLong × festival uplift: the forecast for next week
+  stock: number | null;
+  weeksCover: number | null; // stock ÷ expectedWeekly; null when there is no demand or no stock figure
+  minCoverWeeks: number;
+  maxCoverWeeks: number;
+  perishable: boolean;
+  lastWeek: number | null;
+  prevWeek: number | null;
+  wowPct: number | null;
+  topDistributor: { id: string; sharePct: number; change: number } | null;
+  unitsToMinCover: number; // how far stock is below the minimum window
   standardOrderQty: number;
+  ruleSuggestedQty: number | null; // what the rules alone would order (also shown on exceptions)
 }
 
-export type Evaluation =
-  | { kind: "ok"; skuId: string; metrics: Metrics }
-  | { kind: "flag"; skuId: string; flags: Flag[]; primaryFlag: Flag; action: Action; recommendedQty: number; metrics: Metrics }
-  | { kind: "exception"; skuId: string; types: ExceptionType[]; ruleFlags: Flag[]; metrics: Metrics };
+export interface Evaluation {
+  skuId: string;
+  flags: Flag[];
+  exceptions: ExceptionCode[];
+  queue: "none" | "review" | "exception";
+  action: Action;
+  recommendedQty: number | null;
+  metrics: ItemMetrics;
+}
 
-const mean = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : 0);
-const round2 = (n: number) => Math.round(n * 100) / 100;
-
-// Threshold comparisons that ignore floating-point noise, so "exactly 20%" or "exactly 6 weeks" never flags
-// (e.g. 1000/12 × 1.2 evaluates to 99.99999999999999, not 100).
+// Rules say "more than" / "falls below" / "exceeds": strict comparisons. The tolerance stops float noise
+// (1000/12 × 1.2 = 99.99999999999999) from deciding a flag that sits exactly on a threshold.
 const EPS = 1e-9;
 const gt = (a: number, b: number) => a - b > EPS * Math.max(1, Math.abs(b));
 const lt = (a: number, b: number) => b - a > EPS * Math.max(1, Math.abs(b));
 
-/** Share of the week-on-week change driven by the single biggest distributor moving the same way. */
-export function distributorConcentration(previous: Record<string, number>, current: Record<string, number>) {
-  const ids = new Set([...Object.keys(previous), ...Object.keys(current)]);
-  const deltas = [...ids].map((id) => ({ id, delta: (current[id] ?? 0) - (previous[id] ?? 0) }));
-  const total = deltas.reduce((a, d) => a + d.delta, 0);
-  if (total === 0) return null;
-  const top = deltas.reduce((best, d) => (d.delta / total > best.delta / total ? d : best));
-  return { id: top.id, sharePct: round2((top.delta / total) * 100) };
+const mean = (xs: number[]) => (xs.length ? xs.reduce((s, x) => s + x, 0) / xs.length : 0);
+const round = (x: number, dp = 2) => Math.round(x * 10 ** dp) / 10 ** dp;
+
+export function isPerishable(skuId: string, fileFlag: boolean, cfg: RulesConfig) {
+  return cfg.perishableOverrides[skuId] ?? fileFlag;
 }
 
-export function computeMetrics(sku: SkuInput, config: RulesConfig, planningMonth: number): Metrics {
-  const u = sku.weeklyUnits;
-  const avg4 = mean(u.slice(-config.highDemand.recentWeeks));
-  const avg12 = mean(u.slice(-config.highDemand.baselineWeeks));
-  const festival = config.festival.months.includes(planningMonth);
-  const uplift = festival ? config.festival.upliftMultiplier : 1;
-  const expectedWeekly = avg12 * uplift;
-  const window = sku.isPerishable ? config.cover.perishable : config.cover.standard;
-  const last = u.at(-1) ?? 0;
-  const prev = u.length >= 2 ? u[u.length - 2] : null;
-  return {
-    weeksOfHistory: u.length,
-    avg4: round2(avg4),
-    avg12: round2(avg12),
-    pct4v12: avg12 > 0 ? round2((avg4 / avg12 - 1) * 100) : null,
+/** Evaluates one SKU. planningDate is the date the plan is for (its month decides the festival uplift). */
+export function evaluateSku(input: SkuInput, cfg: RulesConfig, planningDate: string): Evaluation {
+  const perishable = isPerishable(input.skuId, input.perishable, cfg);
+  const weekly = input.weekly;
+  const avgShort = mean(weekly.slice(-cfg.shortWindowWeeks));
+  const avgLong = mean(weekly.slice(-cfg.longWindowWeeks));
+  const festival = cfg.festivalMonths.includes(monthOf(planningDate));
+  const upliftFactor = festival ? 1 + cfg.festivalUpliftPct / 100 : 1;
+  const expectedWeekly = Math.max(0, avgLong) * upliftFactor;
+  const minCoverWeeks = perishable ? cfg.perishableMinCoverWeeks : cfg.minCoverWeeks;
+  const maxCoverWeeks = perishable ? cfg.perishableMaxCoverWeeks : cfg.maxCoverWeeks;
+  const stock = input.stock;
+  const weeksCover = stock == null || expectedWeekly <= 0 ? null : stock / expectedWeekly;
+
+  // ---- Flags (rules 1–5) ----
+  const flags: Flag[] = [];
+  if (avgLong > 0 && gt(avgShort, avgLong * (1 + cfg.highDemandPct / 100))) flags.push("HIGH_DEMAND");
+  if (stock != null && expectedWeekly > 0 && lt(stock, minCoverWeeks * expectedWeekly)) flags.push("STOCKOUT_RISK");
+  if (stock != null && stock > 0 && (expectedWeekly <= 0 || gt(stock, maxCoverWeeks * expectedWeekly))) flags.push("OVERSTOCK_RISK");
+
+  // ---- Exceptions (rule 6): cases the rules can't decide go to Raghav's judgement queue ----
+  const exceptions: ExceptionCode[] = [];
+  if (weekly.length < cfg.newSkuMinWeeks) exceptions.push("NEW_SKU");
+
+  const lastWeek = weekly.length ? weekly[weekly.length - 1] : null;
+  const prevWeek = weekly.length > 1 ? weekly[weekly.length - 2] : null;
+  let wowPct: number | null = null;
+  if (lastWeek != null && prevWeek != null) {
+    if (prevWeek > 0) wowPct = ((lastWeek - prevWeek) / prevWeek) * 100;
+    else if (lastWeek > 0) wowPct = Infinity; // from nothing to something is always a swing
+    if (wowPct != null && gt(Math.abs(wowPct), cfg.wowSwingPct)) exceptions.push("WOW_SWING");
+  }
+
+  const topDistributor = distributorConcentration(input, prevWeek, lastWeek);
+  if (topDistributor && prevWeek != null && lastWeek != null) {
+    const change = Math.abs(lastWeek - prevWeek);
+    const bigEnough = change > 0 && !lt(change, (cfg.distributorMinChangePct / 100) * Math.abs(prevWeek));
+    if (bigEnough && gt(topDistributor.sharePct, cfg.distributorSharePct)) exceptions.push("DISTRIBUTOR_CONCENTRATION");
+  }
+
+  if (flags.includes("HIGH_DEMAND") && flags.includes("OVERSTOCK_RISK")) exceptions.push("RULES_CONFLICT");
+  if (stock == null) exceptions.push("NO_STOCK_DATA");
+
+  // ---- Quantities: the rules compute, Raghav decides ----
+  let action: Action = null;
+  let ruleSuggestedQty: number | null = null;
+  const std = input.standardOrderQty;
+  if (flags.includes("OVERSTOCK_RISK")) {
+    action = "pause";
+    ruleSuggestedQty = 0;
+  } else if (flags.includes("HIGH_DEMAND")) {
+    action = flags.includes("STOCKOUT_RISK") ? "reorder_now" : "reorder";
+    ruleSuggestedQty = round(std * cfg.highDemandOrderMultiplier, 0);
+  } else if (flags.includes("STOCKOUT_RISK")) {
+    action = "reorder_now";
+    ruleSuggestedQty = std;
+  }
+
+  const queue = exceptions.length ? "exception" : flags.length ? "review" : "none";
+  const metrics: ItemMetrics = {
+    weeksOfHistory: weekly.length,
+    avgShort: round(avgShort),
+    avgLong: round(avgLong),
+    changePct: avgLong > 0 ? round((avgShort / avgLong - 1) * 100, 1) : null,
     festival,
-    uplift,
-    expectedWeekly: round2(expectedWeekly),
-    stockOnHand: sku.stockOnHand,
-    weeksOfCover: expectedWeekly > 0 ? round2(sku.stockOnHand / expectedWeekly) : null,
-    coverWindow: { ...window, perishable: sku.isPerishable },
-    lastWeekUnits: last,
-    prevWeekUnits: prev,
-    wowPct: prev ? round2((last / prev - 1) * 100) : null,
-    topDistributor: sku.distributorLastTwoWeeks
-      ? distributorConcentration(sku.distributorLastTwoWeeks.previous, sku.distributorLastTwoWeeks.current)
-      : undefined,
-    standardOrderQty: sku.standardOrderQty,
+    upliftFactor,
+    expectedWeekly: round(expectedWeekly),
+    stock,
+    weeksCover: weeksCover == null ? null : round(weeksCover, 1),
+    minCoverWeeks,
+    maxCoverWeeks,
+    perishable,
+    lastWeek,
+    prevWeek,
+    wowPct: wowPct == null ? null : Number.isFinite(wowPct) ? round(wowPct, 1) : null,
+    topDistributor,
+    unitsToMinCover: stock == null ? 0 : Math.max(0, Math.ceil(minCoverWeeks * expectedWeekly - stock)),
+    standardOrderQty: std,
+    ruleSuggestedQty,
+  };
+
+  return {
+    skuId: input.skuId,
+    flags,
+    exceptions,
+    queue,
+    action: queue === "exception" ? "judgement" : action,
+    recommendedQty: queue === "review" ? ruleSuggestedQty : null,
+    metrics,
   };
 }
 
-/** The three threshold rules, computed from raw (unrounded) inputs so exact edges behave exactly. */
-export function ruleFlags(sku: SkuInput, config: RulesConfig, planningMonth: number): Flag[] {
-  const u = sku.weeklyUnits;
-  const avg4 = mean(u.slice(-config.highDemand.recentWeeks));
-  const avg12 = mean(u.slice(-config.highDemand.baselineWeeks));
-  const uplift = config.festival.months.includes(planningMonth) ? config.festival.upliftMultiplier : 1;
-  const expected = avg12 * uplift;
-  const window = sku.isPerishable ? config.cover.perishable : config.cover.standard;
-  const flags: Flag[] = [];
-
-  // Rule 2: last-4-week sales more than X% above the 12-week weekly average.
-  if (avg12 > 0 && gt(avg4, avg12 * (1 + config.highDemand.thresholdPct / 100))) flags.push("HIGH_DEMAND");
-
-  // Rules 3–5: stock below min / above max weeks of (uplifted) expected demand.
-  if (expected > 0) {
-    if (lt(sku.stockOnHand, window.minWeeks * expected)) flags.push("STOCKOUT_RISK");
-    if (gt(sku.stockOnHand, window.maxWeeks * expected)) flags.push("OVERSTOCK_RISK");
-  } else if (sku.stockOnHand > 0) {
-    // No sales at all but stock on hand: any stock exceeds 14 (or 4) weeks of zero demand.
-    flags.push("OVERSTOCK_RISK");
+/** The distributor whose own week-on-week change is the largest share of the SKU's total change. */
+function distributorConcentration(input: SkuInput, prevWeek: number | null, lastWeek: number | null) {
+  const last = input.lastWeekByDistributor;
+  const prev = input.prevWeekByDistributor;
+  if (!last || !prev || prevWeek == null || lastWeek == null) return null;
+  const total = lastWeek - prevWeek;
+  if (total === 0) return null;
+  let best: { id: string; sharePct: number; change: number } | null = null;
+  for (const id of new Set([...Object.keys(last), ...Object.keys(prev)])) {
+    const change = (last[id] ?? 0) - (prev[id] ?? 0);
+    const sharePct = (Math.abs(change) / Math.abs(total)) * 100;
+    if (!best || sharePct > best.sharePct) best = { id, sharePct: round(sharePct, 1), change };
   }
-  return flags;
-}
-
-export function exceptionTypes(sku: SkuInput, config: RulesConfig, metrics: Metrics, flags: Flag[]): ExceptionType[] {
-  const types: ExceptionType[] = [];
-  const ex = config.exceptions;
-  if (metrics.weeksOfHistory < ex.minHistoryWeeks) types.push("NEW_SKU");
-  if (metrics.topDistributor && gt(metrics.topDistributor.sharePct, ex.distributorConcentrationPct)) types.push("DISTRIBUTOR_CONCENTRATION");
-  const { lastWeekUnits: last, prevWeekUnits: prev } = metrics;
-  if (prev !== null && (prev === 0 ? last > 0 : gt(Math.abs(last / prev - 1) * 100, ex.wowSwingPct))) types.push("WOW_SWING");
-  // Demand rising while stock is already too high: the rules disagree with each other.
-  if (flags.includes("HIGH_DEMAND") && flags.includes("OVERSTOCK_RISK")) types.push("CONFLICTING_FLAGS");
-  return types;
-}
-
-const PRIORITY: Flag[] = ["STOCKOUT_RISK", "HIGH_DEMAND", "OVERSTOCK_RISK"];
-
-/** Recommended quantity and action for a set of flags. Quantities come only from here. */
-export function recommend(flags: Flag[], standardOrderQty: number, config: RulesConfig): { action: Action; qty: number } {
-  if (flags.includes("OVERSTOCK_RISK")) return { action: "PAUSE_NEXT_ORDER", qty: 0 };
-  const qty = flags.includes("HIGH_DEMAND")
-    ? Math.round(standardOrderQty * config.highDemand.orderMultiplier)
-    : standardOrderQty;
-  return { action: flags.includes("STOCKOUT_RISK") ? "REORDER_NOW" : "REORDER", qty };
-}
-
-/**
- * Evaluate one SKU. `planningMonth` (1–12) is the month of the week being planned for — the festival
- * uplift applies when it is a festival month.
- */
-export function evaluateSku(sku: SkuInput, config: RulesConfig, planningMonth: number): Evaluation {
-  const metrics = computeMetrics(sku, config, planningMonth);
-  const flags = ruleFlags(sku, config, planningMonth);
-  const types = exceptionTypes(sku, config, metrics, flags);
-  if (types.length) return { kind: "exception", skuId: sku.skuId, types, ruleFlags: flags, metrics };
-  if (!flags.length) return { kind: "ok", skuId: sku.skuId, metrics };
-  const { action, qty } = recommend(flags, sku.standardOrderQty, config);
-  const primaryFlag = PRIORITY.find((f) => flags.includes(f))!;
-  return { kind: "flag", skuId: sku.skuId, flags, primaryFlag, action, recommendedQty: qty, metrics };
+  return best;
 }

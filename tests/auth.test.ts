@@ -1,33 +1,28 @@
-import { describe, expect, it, beforeEach } from "vitest";
-import { decodeSession, encodeSession, roleForPassword } from "@/lib/auth";
+import { describe, it, expect, beforeEach } from "vitest";
+import { roleForPassword, safeEqual, signSession, verifySession } from "@/lib/auth/session";
 
 beforeEach(() => {
-  process.env.DASHBOARD_PASSWORD = "planner-pass";
-  process.env.VIEWER_PASSWORD = "viewer-pass";
   process.env.AUTH_SECRET = "test-secret";
+  process.env.DASHBOARD_PASSWORD = "planner-pw";
+  process.env.VIEWER_PASSWORD = "viewer-pw";
 });
 
-describe("auth", () => {
+describe("session cookie", () => {
+  it("round-trips and rejects tampering or expiry", async () => {
+    const token = await signSession({ name: "Raghav", role: "planner" });
+    expect(await verifySession(token)).toMatchObject({ name: "Raghav", role: "planner" });
+    const [body, sig] = token.split(".");
+    const forged = Buffer.from(JSON.stringify({ name: "X", role: "planner", exp: Date.now() + 1e9 })).toString("base64url");
+    expect(await verifySession(`${forged}.${sig}`)).toBeNull();
+    expect(await verifySession(`${body}.x${sig.slice(1)}`)).toBeNull();
+    expect(await verifySession(token, Date.now() + 15 * 86_400_000)).toBeNull();
+    process.env.AUTH_SECRET = "rotated";
+    expect(await verifySession(token)).toBeNull();
+  });
   it("maps passwords to roles", () => {
-    expect(roleForPassword("planner-pass")).toBe("planner");
-    expect(roleForPassword("viewer-pass")).toBe("viewer");
+    expect(roleForPassword("planner-pw")).toBe("planner");
+    expect(roleForPassword("viewer-pw")).toBe("viewer");
     expect(roleForPassword("nope")).toBeNull();
-  });
-
-  it("round-trips a signed session", () => {
-    const v = encodeSession({ name: "Raghav", role: "planner" });
-    expect(decodeSession(v)).toEqual({ name: "Raghav", role: "planner" });
-  });
-
-  it("rejects a tampered session (e.g. viewer → planner)", () => {
-    const v = encodeSession({ name: "Deepa", role: "viewer" });
-    const [, sig] = v.split(".");
-    const forged = Buffer.from(JSON.stringify({ name: "Deepa", role: "planner", exp: Date.now() + 1e6 })).toString("base64url");
-    expect(decodeSession(`${forged}.${sig}`)).toBeNull();
-  });
-
-  it("rejects an expired session", () => {
-    const v = encodeSession({ name: "Raghav", role: "planner" }, Date.now() - 15 * 86_400_000);
-    expect(decodeSession(v)).toBeNull();
+    expect(safeEqual("abc", "abcd")).toBe(false);
   });
 });
