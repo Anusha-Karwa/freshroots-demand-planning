@@ -14,6 +14,8 @@ export { schema };
 export type Db = NodePgDatabase<typeof schema>;
 
 const MIGRATIONS = path.join(process.cwd(), "drizzle");
+// Migration bookkeeping sits next to the tables, separate from any other app's drizzle history.
+const MIGRATE = { migrationsFolder: MIGRATIONS, migrationsSchema: "freshroots", migrationsTable: "__migrations" };
 
 export const databaseMode = (): "postgres" | "local" => (process.env.DATABASE_URL ? "postgres" : "local");
 
@@ -38,7 +40,7 @@ function open(): Holder {
   const db = drizzlePglite(client, { schema });
   return {
     db: db as unknown as Db,
-    ready: migratePglite(db, { migrationsFolder: MIGRATIONS }),
+    ready: migratePglite(db, MIGRATE),
     close: () => client.close(),
   };
 }
@@ -53,7 +55,7 @@ async function migrateWithLock(pool: Pool) {
   const client = await direct.connect();
   try {
     await client.query("select pg_advisory_lock(4417001)");
-    await migratePg(drizzlePg(client, { schema }), { migrationsFolder: MIGRATIONS });
+    await migratePg(drizzlePg(client, { schema }), MIGRATE);
   } finally {
     await client.query("select pg_advisory_unlock(4417001)").catch(() => undefined);
     client.release();

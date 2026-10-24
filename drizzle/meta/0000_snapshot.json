@@ -1,12 +1,12 @@
 {
-  "id": "734f7d0e-58f2-4a1e-8ec0-333df8b41ae8",
+  "id": "4fcffc18-7326-4754-bd3a-01aa693e5fd1",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
-    "public.calendar_months": {
+    "freshroots.calendar_months": {
       "name": "calendar_months",
-      "schema": "",
+      "schema": "freshroots",
       "columns": {
         "year_month": {
           "name": "year_month",
@@ -42,9 +42,9 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.data_loads": {
+    "freshroots.data_loads": {
       "name": "data_loads",
-      "schema": "",
+      "schema": "freshroots",
       "columns": {
         "id": {
           "name": "id",
@@ -110,9 +110,9 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.decision_log": {
+    "freshroots.decision_log": {
       "name": "decision_log",
-      "schema": "",
+      "schema": "freshroots",
       "columns": {
         "id": {
           "name": "id",
@@ -190,9 +190,9 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.distributors": {
+    "freshroots.distributors": {
       "name": "distributors",
-      "schema": "",
+      "schema": "freshroots",
       "columns": {
         "id": {
           "name": "id",
@@ -227,9 +227,9 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.email_log": {
+    "freshroots.email_log": {
       "name": "email_log",
-      "schema": "",
+      "schema": "freshroots",
       "columns": {
         "id": {
           "name": "id",
@@ -283,9 +283,9 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.kill_switch_history": {
+    "freshroots.kill_switch_history": {
       "name": "kill_switch_history",
-      "schema": "",
+      "schema": "freshroots",
       "columns": {
         "check_date": {
           "name": "check_date",
@@ -326,9 +326,9 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.market_events": {
+    "freshroots.market_events": {
       "name": "market_events",
-      "schema": "",
+      "schema": "freshroots",
       "columns": {
         "id": {
           "name": "id",
@@ -394,9 +394,9 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.mock_emails": {
+    "freshroots.mock_emails": {
       "name": "mock_emails",
-      "schema": "",
+      "schema": "freshroots",
       "columns": {
         "id": {
           "name": "id",
@@ -438,9 +438,9 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.mock_zoho_purchase_orders": {
+    "freshroots.mock_zoho_purchase_orders": {
       "name": "mock_zoho_purchase_orders",
-      "schema": "",
+      "schema": "freshroots",
       "columns": {
         "id": {
           "name": "id",
@@ -483,9 +483,9 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.monthly_losses": {
+    "freshroots.monthly_losses": {
       "name": "monthly_losses",
-      "schema": "",
+      "schema": "freshroots",
       "columns": {
         "year_month": {
           "name": "year_month",
@@ -539,9 +539,9 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.planner_history": {
+    "freshroots.planner_history": {
       "name": "planner_history",
-      "schema": "",
+      "schema": "freshroots",
       "columns": {
         "week_start": {
           "name": "week_start",
@@ -579,9 +579,9 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.po_lines": {
+    "freshroots.po_lines": {
       "name": "po_lines",
-      "schema": "",
+      "schema": "freshroots",
       "columns": {
         "id": {
           "name": "id",
@@ -628,9 +628,9 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.purchase_orders": {
+    "freshroots.purchase_orders": {
       "name": "purchase_orders",
-      "schema": "",
+      "schema": "freshroots",
       "columns": {
         "id": {
           "name": "id",
@@ -720,9 +720,9 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.rules_versions": {
+    "freshroots.rules_versions": {
       "name": "rules_versions",
-      "schema": "",
+      "schema": "freshroots",
       "columns": {
         "id": {
           "name": "id",
@@ -764,9 +764,9 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.run_items": {
+    "freshroots.run_items": {
       "name": "run_items",
-      "schema": "",
+      "schema": "freshroots",
       "columns": {
         "id": {
           "name": "id",
@@ -908,9 +908,9 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.runs": {
+    "freshroots.runs": {
       "name": "runs",
-      "schema": "",
+      "schema": "freshroots",
       "columns": {
         "id": {
           "name": "id",
@@ -994,9 +994,9 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.settings": {
+    "freshroots.settings": {
       "name": "settings",
-      "schema": "",
+      "schema": "freshroots",
       "columns": {
         "key": {
           "name": "key",
@@ -1032,9 +1032,9 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.skus": {
+    "freshroots.skus": {
       "name": "skus",
-      "schema": "",
+      "schema": "freshroots",
       "columns": {
         "id": {
           "name": "id",
@@ -1120,9 +1120,9 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.stock_snapshots": {
+    "freshroots.stock_snapshots": {
       "name": "stock_snapshots",
-      "schema": "",
+      "schema": "freshroots",
       "columns": {
         "as_of": {
           "name": "as_of",
@@ -1166,9 +1166,9 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.stockout_incidents": {
+    "freshroots.stockout_incidents": {
       "name": "stockout_incidents",
-      "schema": "",
+      "schema": "freshroots",
       "columns": {
         "id": {
           "name": "id",
@@ -1228,9 +1228,9 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.tracker_checks": {
+    "freshroots.tracker_checks": {
       "name": "tracker_checks",
-      "schema": "",
+      "schema": "freshroots",
       "columns": {
         "check_date": {
           "name": "check_date",
@@ -1303,9 +1303,9 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.uploads": {
+    "freshroots.uploads": {
       "name": "uploads",
-      "schema": "",
+      "schema": "freshroots",
       "columns": {
         "id": {
           "name": "id",
@@ -1353,9 +1353,9 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.weekly_sales": {
+    "freshroots.weekly_sales": {
       "name": "weekly_sales",
-      "schema": "",
+      "schema": "freshroots",
       "columns": {
         "week_start": {
           "name": "week_start",
@@ -1415,9 +1415,9 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.zoho_api_log": {
+    "freshroots.zoho_api_log": {
       "name": "zoho_api_log",
-      "schema": "",
+      "schema": "freshroots",
       "columns": {
         "id": {
           "name": "id",
@@ -1467,7 +1467,9 @@
     }
   },
   "enums": {},
-  "schemas": {},
+  "schemas": {
+    "freshroots": "freshroots"
+  },
   "sequences": {},
   "roles": {},
   "policies": {},

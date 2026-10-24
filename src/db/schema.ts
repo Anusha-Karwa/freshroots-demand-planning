@@ -1,8 +1,14 @@
 import {
-  pgTable, text, integer, serial, boolean, numeric, date, timestamp, jsonb, primaryKey, index,
+  pgSchema, text, integer, serial, boolean, numeric, date, timestamp, jsonb, primaryKey, index,
 } from "drizzle-orm/pg-core";
 import type { RulesConfig } from "@/lib/rules/config";
 import type { ItemMetrics } from "@/lib/rules/engine";
+
+/**
+ * All tables live in their own Postgres schema, so they never clash with other apps' tables in the same
+ * database (an earlier version of this app left tables with the same names in "public").
+ */
+export const app = pgSchema("freshroots");
 
 // Numeric columns come back as strings from Postgres; mode "number" converts them for us.
 const qty = (name: string) => numeric(name, { mode: "number" });
@@ -10,7 +16,7 @@ const createdAt = () => timestamp("created_at", { withTimezone: true }).defaultN
 
 // ---------- Master data (from SAP / seed files) ----------
 
-export const skus = pgTable("skus", {
+export const skus = app.table("skus", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
   category: text("category"),
@@ -27,7 +33,7 @@ export const skus = pgTable("skus", {
   active: boolean("active").default(true).notNull(),
 });
 
-export const distributors = pgTable("distributors", {
+export const distributors = app.table("distributors", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
   region: text("region"),
@@ -35,7 +41,7 @@ export const distributors = pgTable("distributors", {
 });
 
 /** One row per month. Festival months for the rules live in the rules config; this is the context calendar. */
-export const calendarMonths = pgTable("calendar_months", {
+export const calendarMonths = app.table("calendar_months", {
   yearMonth: text("year_month").primaryKey(), // "2026-10"
   isFestival: boolean("is_festival").default(false).notNull(),
   festivalName: text("festival_name"),
@@ -43,7 +49,7 @@ export const calendarMonths = pgTable("calendar_months", {
 });
 
 /** Demand context the planner adds by hand: competitor schemes, one-off events. Gemini sees them. */
-export const marketEvents = pgTable("market_events", {
+export const marketEvents = app.table("market_events", {
   id: serial("id").primaryKey(),
   kind: text("kind").notNull(), // competitor_scheme | festival | other
   description: text("description").notNull(),
@@ -58,14 +64,14 @@ export const marketEvents = pgTable("market_events", {
 // ---------- Transactions ----------
 
 /** Weekly units by SKU × distributor. weekStart is the Monday. distributorId "ALL" = SKU-level total only. */
-export const weeklySales = pgTable("weekly_sales", {
+export const weeklySales = app.table("weekly_sales", {
   weekStart: date("week_start").notNull(),
   skuId: text("sku_id").notNull(),
   distributorId: text("distributor_id").notNull(),
   units: qty("units").notNull(),
 }, (t) => [primaryKey({ columns: [t.weekStart, t.skuId, t.distributorId] }), index("weekly_sales_sku").on(t.skuId)]);
 
-export const stockSnapshots = pgTable("stock_snapshots", {
+export const stockSnapshots = app.table("stock_snapshots", {
   asOf: date("as_of").notNull(),
   skuId: text("sku_id").notNull(),
   location: text("location").notNull(),
@@ -75,7 +81,7 @@ export const stockSnapshots = pgTable("stock_snapshots", {
 // ---------- Rules config & settings ----------
 
 /** Every change to Raghav's rules is a new row; the latest row is in force. */
-export const rulesVersions = pgTable("rules_versions", {
+export const rulesVersions = app.table("rules_versions", {
   id: serial("id").primaryKey(),
   config: jsonb("config").$type<RulesConfig>().notNull(),
   note: text("note"),
@@ -84,7 +90,7 @@ export const rulesVersions = pgTable("rules_versions", {
 });
 
 /** Key/value settings: baseline, kill-switch thresholds, supplier → Zoho vendor map. */
-export const settings = pgTable("settings", {
+export const settings = app.table("settings", {
   key: text("key").primaryKey(),
   value: jsonb("value").notNull(),
   updatedBy: text("updated_by"),
@@ -93,7 +99,7 @@ export const settings = pgTable("settings", {
 
 // ---------- Forecast runs ----------
 
-export const runs = pgTable("runs", {
+export const runs = app.table("runs", {
   id: serial("id").primaryKey(),
   trigger: text("trigger").notNull(), // cron | manual | script
   status: text("status").notNull(), // running | done | failed
@@ -109,7 +115,7 @@ export const runs = pgTable("runs", {
 });
 
 /** One row per SKU per run, flagged or not (the unflagged rows give the tracker its forecast). */
-export const runItems = pgTable("run_items", {
+export const runItems = app.table("run_items", {
   id: serial("id").primaryKey(),
   runId: integer("run_id").notNull(),
   skuId: text("sku_id").notNull(),
@@ -134,7 +140,7 @@ export const runItems = pgTable("run_items", {
 }, (t) => [index("run_items_run").on(t.runId)]);
 
 /** Append-only log of every decision, including changes of mind. */
-export const decisionLog = pgTable("decision_log", {
+export const decisionLog = app.table("decision_log", {
   id: serial("id").primaryKey(),
   runItemId: integer("run_item_id").notNull(),
   runId: integer("run_id").notNull(),
@@ -150,7 +156,7 @@ export const decisionLog = pgTable("decision_log", {
 
 // ---------- Purchase orders ----------
 
-export const purchaseOrders = pgTable("purchase_orders", {
+export const purchaseOrders = app.table("purchase_orders", {
   id: serial("id").primaryKey(),
   runId: integer("run_id").notNull(),
   supplierId: text("supplier_id").notNull(),
@@ -166,7 +172,7 @@ export const purchaseOrders = pgTable("purchase_orders", {
   createdAt: createdAt(),
 });
 
-export const poLines = pgTable("po_lines", {
+export const poLines = app.table("po_lines", {
   id: serial("id").primaryKey(),
   poId: integer("po_id").notNull(),
   runItemId: integer("run_item_id").notNull(),
@@ -176,7 +182,7 @@ export const poLines = pgTable("po_lines", {
 });
 
 /** Stand-in for Zoho when its keys are missing. */
-export const mockZohoPurchaseOrders = pgTable("mock_zoho_purchase_orders", {
+export const mockZohoPurchaseOrders = app.table("mock_zoho_purchase_orders", {
   id: serial("id").primaryKey(),
   poNumber: text("po_number").notNull(),
   status: text("status").default("draft").notNull(),
@@ -184,7 +190,7 @@ export const mockZohoPurchaseOrders = pgTable("mock_zoho_purchase_orders", {
   createdAt: createdAt(),
 });
 
-export const zohoApiLog = pgTable("zoho_api_log", {
+export const zohoApiLog = app.table("zoho_api_log", {
   id: serial("id").primaryKey(),
   method: text("method").notNull(),
   path: text("path").notNull(),
@@ -196,7 +202,7 @@ export const zohoApiLog = pgTable("zoho_api_log", {
 // ---------- Emails ----------
 
 /** Stand-in for Resend when its key is missing. */
-export const mockEmails = pgTable("mock_emails", {
+export const mockEmails = app.table("mock_emails", {
   id: serial("id").primaryKey(),
   to: text("to").notNull(),
   subject: text("subject").notNull(),
@@ -204,7 +210,7 @@ export const mockEmails = pgTable("mock_emails", {
   createdAt: createdAt(),
 });
 
-export const emailLog = pgTable("email_log", {
+export const emailLog = app.table("email_log", {
   id: serial("id").primaryKey(),
   mode: text("mode").notNull(),
   to: text("to").notNull(),
@@ -217,7 +223,7 @@ export const emailLog = pgTable("email_log", {
 // ---------- Measurement ----------
 
 /** Daily early-warning: latest week's actual units vs the forecast a run made for it. */
-export const trackerChecks = pgTable("tracker_checks", {
+export const trackerChecks = app.table("tracker_checks", {
   checkDate: date("check_date").notNull(),
   skuId: text("sku_id").notNull(),
   weekStart: date("week_start").notNull(),
@@ -229,7 +235,7 @@ export const trackerChecks = pgTable("tracker_checks", {
   status: text("status").notNull(), // on_track | above | below | stockout
 }, (t) => [primaryKey({ columns: [t.checkDate, t.skuId] })]);
 
-export const stockoutIncidents = pgTable("stockout_incidents", {
+export const stockoutIncidents = app.table("stockout_incidents", {
   id: serial("id").primaryKey(),
   skuId: text("sku_id").notNull(),
   weekStart: date("week_start").notNull(),
@@ -241,7 +247,7 @@ export const stockoutIncidents = pgTable("stockout_incidents", {
 });
 
 /** The primary outcome metric, entered monthly from finance's numbers. */
-export const monthlyLosses = pgTable("monthly_losses", {
+export const monthlyLosses = app.table("monthly_losses", {
   yearMonth: text("year_month").primaryKey(),
   stockoutLoss: qty("stockout_loss").notNull(),
   overstockWriteoff: qty("overstock_writeoff").notNull(),
@@ -251,7 +257,7 @@ export const monthlyLosses = pgTable("monthly_losses", {
   updatedAt: createdAt(),
 });
 
-export const killSwitchHistory = pgTable("kill_switch_history", {
+export const killSwitchHistory = app.table("kill_switch_history", {
   checkDate: date("check_date").primaryKey(),
   overall: text("overall").notNull(),
   early: text("early").notNull(),
@@ -262,7 +268,7 @@ export const killSwitchHistory = pgTable("kill_switch_history", {
 // ---------- Data loading ----------
 
 /** SAP CSVs wait here between upload and the column-mapping step (serverless instances share nothing else). */
-export const uploads = pgTable("uploads", {
+export const uploads = app.table("uploads", {
   id: serial("id").primaryKey(),
   kind: text("kind").notNull(),
   filename: text("filename").notNull(),
@@ -271,7 +277,7 @@ export const uploads = pgTable("uploads", {
   createdAt: createdAt(),
 });
 
-export const dataLoads = pgTable("data_loads", {
+export const dataLoads = app.table("data_loads", {
   id: serial("id").primaryKey(),
   source: text("source").notNull(), // seed | sap_upload
   kind: text("kind").notNull(),
@@ -284,7 +290,7 @@ export const dataLoads = pgTable("data_loads", {
 });
 
 /** Optional: Raghav's past manual flags, for the backtest's agreement score. */
-export const plannerHistory = pgTable("planner_history", {
+export const plannerHistory = app.table("planner_history", {
   weekStart: date("week_start").notNull(),
   skuId: text("sku_id").notNull(),
   flag: text("flag").notNull(), // HIGH_DEMAND | STOCKOUT_RISK | OVERSTOCK_RISK | NONE

@@ -1,11 +1,13 @@
-CREATE TABLE "calendar_months" (
+CREATE SCHEMA IF NOT EXISTS "freshroots";
+--> statement-breakpoint
+CREATE TABLE "freshroots"."calendar_months" (
 	"year_month" text PRIMARY KEY NOT NULL,
 	"is_festival" boolean DEFAULT false NOT NULL,
 	"festival_name" text,
 	"competitor_scheme" text
 );
 --> statement-breakpoint
-CREATE TABLE "data_loads" (
+CREATE TABLE "freshroots"."data_loads" (
 	"id" serial PRIMARY KEY NOT NULL,
 	"source" text NOT NULL,
 	"kind" text NOT NULL,
@@ -17,7 +19,7 @@ CREATE TABLE "data_loads" (
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
-CREATE TABLE "decision_log" (
+CREATE TABLE "freshroots"."decision_log" (
 	"id" serial PRIMARY KEY NOT NULL,
 	"run_item_id" integer NOT NULL,
 	"run_id" integer NOT NULL,
@@ -31,14 +33,14 @@ CREATE TABLE "decision_log" (
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
-CREATE TABLE "distributors" (
+CREATE TABLE "freshroots"."distributors" (
 	"id" text PRIMARY KEY NOT NULL,
 	"name" text NOT NULL,
 	"region" text,
 	"status" text
 );
 --> statement-breakpoint
-CREATE TABLE "email_log" (
+CREATE TABLE "freshroots"."email_log" (
 	"id" serial PRIMARY KEY NOT NULL,
 	"mode" text NOT NULL,
 	"to" text NOT NULL,
@@ -48,7 +50,7 @@ CREATE TABLE "email_log" (
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
-CREATE TABLE "kill_switch_history" (
+CREATE TABLE "freshroots"."kill_switch_history" (
 	"check_date" date PRIMARY KEY NOT NULL,
 	"overall" text NOT NULL,
 	"early" text NOT NULL,
@@ -56,7 +58,7 @@ CREATE TABLE "kill_switch_history" (
 	"detail" jsonb
 );
 --> statement-breakpoint
-CREATE TABLE "market_events" (
+CREATE TABLE "freshroots"."market_events" (
 	"id" serial PRIMARY KEY NOT NULL,
 	"kind" text NOT NULL,
 	"description" text NOT NULL,
@@ -68,7 +70,7 @@ CREATE TABLE "market_events" (
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
-CREATE TABLE "mock_emails" (
+CREATE TABLE "freshroots"."mock_emails" (
 	"id" serial PRIMARY KEY NOT NULL,
 	"to" text NOT NULL,
 	"subject" text NOT NULL,
@@ -76,7 +78,7 @@ CREATE TABLE "mock_emails" (
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
-CREATE TABLE "mock_zoho_purchase_orders" (
+CREATE TABLE "freshroots"."mock_zoho_purchase_orders" (
 	"id" serial PRIMARY KEY NOT NULL,
 	"po_number" text NOT NULL,
 	"status" text DEFAULT 'draft' NOT NULL,
@@ -84,7 +86,7 @@ CREATE TABLE "mock_zoho_purchase_orders" (
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
-CREATE TABLE "monthly_losses" (
+CREATE TABLE "freshroots"."monthly_losses" (
 	"year_month" text PRIMARY KEY NOT NULL,
 	"stockout_loss" numeric NOT NULL,
 	"overstock_writeoff" numeric NOT NULL,
@@ -94,14 +96,14 @@ CREATE TABLE "monthly_losses" (
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
-CREATE TABLE "planner_history" (
+CREATE TABLE "freshroots"."planner_history" (
 	"week_start" date NOT NULL,
 	"sku_id" text NOT NULL,
 	"flag" text NOT NULL,
 	CONSTRAINT "planner_history_week_start_sku_id_flag_pk" PRIMARY KEY("week_start","sku_id","flag")
 );
 --> statement-breakpoint
-CREATE TABLE "po_lines" (
+CREATE TABLE "freshroots"."po_lines" (
 	"id" serial PRIMARY KEY NOT NULL,
 	"po_id" integer NOT NULL,
 	"run_item_id" integer NOT NULL,
@@ -110,7 +112,7 @@ CREATE TABLE "po_lines" (
 	"rate" numeric
 );
 --> statement-breakpoint
-CREATE TABLE "purchase_orders" (
+CREATE TABLE "freshroots"."purchase_orders" (
 	"id" serial PRIMARY KEY NOT NULL,
 	"run_id" integer NOT NULL,
 	"supplier_id" text NOT NULL,
@@ -126,7 +128,7 @@ CREATE TABLE "purchase_orders" (
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
-CREATE TABLE "rules_versions" (
+CREATE TABLE "freshroots"."rules_versions" (
 	"id" serial PRIMARY KEY NOT NULL,
 	"config" jsonb NOT NULL,
 	"note" text,
@@ -134,7 +136,7 @@ CREATE TABLE "rules_versions" (
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
-CREATE TABLE "run_items" (
+CREATE TABLE "freshroots"."run_items" (
 	"id" serial PRIMARY KEY NOT NULL,
 	"run_id" integer NOT NULL,
 	"sku_id" text NOT NULL,
@@ -156,7 +158,7 @@ CREATE TABLE "run_items" (
 	"po_id" integer
 );
 --> statement-breakpoint
-CREATE TABLE "runs" (
+CREATE TABLE "freshroots"."runs" (
 	"id" serial PRIMARY KEY NOT NULL,
 	"trigger" text NOT NULL,
 	"status" text NOT NULL,
@@ -171,14 +173,14 @@ CREATE TABLE "runs" (
 	"error" text
 );
 --> statement-breakpoint
-CREATE TABLE "settings" (
+CREATE TABLE "freshroots"."settings" (
 	"key" text PRIMARY KEY NOT NULL,
 	"value" jsonb NOT NULL,
 	"updated_by" text,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
-CREATE TABLE "skus" (
+CREATE TABLE "freshroots"."skus" (
 	"id" text PRIMARY KEY NOT NULL,
 	"name" text NOT NULL,
 	"category" text,
@@ -193,7 +195,7 @@ CREATE TABLE "skus" (
 	"active" boolean DEFAULT true NOT NULL
 );
 --> statement-breakpoint
-CREATE TABLE "stock_snapshots" (
+CREATE TABLE "freshroots"."stock_snapshots" (
 	"as_of" date NOT NULL,
 	"sku_id" text NOT NULL,
 	"location" text NOT NULL,
@@ -201,7 +203,7 @@ CREATE TABLE "stock_snapshots" (
 	CONSTRAINT "stock_snapshots_as_of_sku_id_location_pk" PRIMARY KEY("as_of","sku_id","location")
 );
 --> statement-breakpoint
-CREATE TABLE "stockout_incidents" (
+CREATE TABLE "freshroots"."stockout_incidents" (
 	"id" serial PRIMARY KEY NOT NULL,
 	"sku_id" text NOT NULL,
 	"week_start" date NOT NULL,
@@ -212,7 +214,7 @@ CREATE TABLE "stockout_incidents" (
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
-CREATE TABLE "tracker_checks" (
+CREATE TABLE "freshroots"."tracker_checks" (
 	"check_date" date NOT NULL,
 	"sku_id" text NOT NULL,
 	"week_start" date NOT NULL,
@@ -225,7 +227,7 @@ CREATE TABLE "tracker_checks" (
 	CONSTRAINT "tracker_checks_check_date_sku_id_pk" PRIMARY KEY("check_date","sku_id")
 );
 --> statement-breakpoint
-CREATE TABLE "uploads" (
+CREATE TABLE "freshroots"."uploads" (
 	"id" serial PRIMARY KEY NOT NULL,
 	"kind" text NOT NULL,
 	"filename" text NOT NULL,
@@ -234,7 +236,7 @@ CREATE TABLE "uploads" (
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
-CREATE TABLE "weekly_sales" (
+CREATE TABLE "freshroots"."weekly_sales" (
 	"week_start" date NOT NULL,
 	"sku_id" text NOT NULL,
 	"distributor_id" text NOT NULL,
@@ -242,7 +244,7 @@ CREATE TABLE "weekly_sales" (
 	CONSTRAINT "weekly_sales_week_start_sku_id_distributor_id_pk" PRIMARY KEY("week_start","sku_id","distributor_id")
 );
 --> statement-breakpoint
-CREATE TABLE "zoho_api_log" (
+CREATE TABLE "freshroots"."zoho_api_log" (
 	"id" serial PRIMARY KEY NOT NULL,
 	"method" text NOT NULL,
 	"path" text NOT NULL,
@@ -251,5 +253,5 @@ CREATE TABLE "zoho_api_log" (
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
-CREATE INDEX "run_items_run" ON "run_items" USING btree ("run_id");--> statement-breakpoint
-CREATE INDEX "weekly_sales_sku" ON "weekly_sales" USING btree ("sku_id");
+CREATE INDEX "run_items_run" ON "freshroots"."run_items" USING btree ("run_id");--> statement-breakpoint
+CREATE INDEX "weekly_sales_sku" ON "freshroots"."weekly_sales" USING btree ("sku_id");
