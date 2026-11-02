@@ -51,7 +51,7 @@ function DecisionFields({ row, back, exception }: { row: QueueRow; back: string;
           className="num w-full"
         />
         <input name="reason" aria-label={`Reason for ${sku.id}`} placeholder={exception ? "Note (optional)" : "Reason (edit/reject)"} className="w-full" />
-      <div className="flex gap-1.5">
+      <div className="flex flex-wrap gap-1.5">
         {exception ? (
           <button name="decision" value="approved" className="rounded-md bg-[var(--accent)] whitespace-nowrap px-2 py-1 text-xs font-medium text-[var(--accent-ink)]">Set qty</button>
         ) : (

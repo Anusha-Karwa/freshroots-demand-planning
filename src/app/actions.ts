@@ -34,12 +34,13 @@ const number = (fd: FormData, k: string) => {
 const safePath = (p: string) => (p.startsWith("/") && !p.startsWith("//") ? p : "/");
 
 function withBanner(path: string, key: "msg" | "err", value: string) {
-  const [base, query = ""] = path.split("?");
+  const [withoutHash, hash] = path.split("#");
+  const [base, query = ""] = withoutHash.split("?");
   const qs = new URLSearchParams(query);
   qs.delete("msg");
   qs.delete("err");
   qs.set(key, value.slice(0, 400));
-  return `${base}?${qs.toString()}`;
+  return `${base}?${qs.toString()}${hash ? `#${hash}` : ""}`;
 }
 
 /** Runs fn and redirects to path with its message, or with the error. redirect() must stay outside the try. */
@@ -88,7 +89,8 @@ export async function runForecastNow() {
 
 export async function decideAction(fd: FormData) {
   const s = await requirePlanner();
-  const back = safePath(text(fd, "back") || "/review");
+  // Come back to the same row, so deciding down a long list doesn't jump to the top each time.
+  const back = `${safePath(text(fd, "back") || "/review")}#row-${Number(text(fd, "itemId"))}`;
   await attempt(back, async () => {
     const r = await decide(await getDb(), {
       itemId: Number(text(fd, "itemId")),

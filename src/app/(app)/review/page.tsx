@@ -83,7 +83,7 @@ export default async function ReviewPage({ searchParams }: { searchParams: Searc
               <table className="data">
                 <thead>
                   <tr>
-                    <th>SKU</th><th>Flag</th><th className="r">Stock</th><th>Weeks of cover</th><th>4-wk vs 12-wk</th><th className="r">Expected</th>
+                    <th>SKU</th><th>Flag</th><th className="r">Stock · expected</th><th>Weeks of cover</th><th>4-wk vs 12-wk</th>
                     <th className="r">Recommended</th><th>Why (reason)</th><th>Your call</th>
                   </tr>
                 </thead>
@@ -93,21 +93,24 @@ export default async function ReviewPage({ searchParams }: { searchParams: Searc
                     const m = item.metrics;
                     return (
                       <tr key={item.id}>
-                        <td className="min-w-40">
+                        <td className="min-w-36">
+                          <span id={`row-${item.id}`} className="block scroll-mt-16" />
                           <div className="font-medium">{sku.id}</div>
                           <div className="text-xs text-[var(--text-2)]">{sku.name}</div>
                           <div className="mt-0.5 flex gap-1 text-xs text-[var(--text-3)]">{sku.category}{m.perishable && <Badge tone="warn">Perishable</Badge>}</div>
                         </td>
                         <td><div className="flex flex-col gap-1">{(item.flags as Flag[]).map((f) => <Badge key={f} tone={FLAG_TONE[f]}>{FLAG_LABEL[f]}</Badge>)}</div></td>
-                        <td className="r num">{num(m.stock)}</td>
+                        <td className="r num">
+                          <div>{num(m.stock)}</div>
+                          <div className="text-xs text-[var(--text-3)]"><ExpectedCell m={m} /></div>
+                        </td>
                         <td><CoverCell m={m} /></td>
                         <td><TrendCell m={m} /></td>
-                        <td className="r"><ExpectedCell m={m} /></td>
                         <td className="r num">
                           <div className="font-semibold">{num(item.recommendedQty)}</div>
                           <div className="text-xs text-[var(--text-3)]">{actionLabel(item.action)} · std {num(sku.standardOrderQty)}</div>
                         </td>
-                        <td className="min-w-48 max-w-[15rem] text-xs">
+                        <td className="min-w-44 max-w-[13rem] text-xs">
                           {item.reason}
                           <div className="mt-1"><Badge tone={item.reasonSource === "gemini" ? "info" : "mute"}>{item.reasonSource === "gemini" ? "Gemini" : "Template"}</Badge></div>
                         </td>

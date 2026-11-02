@@ -39,6 +39,7 @@ export default async function ExceptionsPage({ searchParams }: { searchParams: S
                 return (
                   <tr key={item.id}>
                     <td className="min-w-40">
+                          <span id={`row-${item.id}`} className="block scroll-mt-16" />
                       <div className="font-medium">{sku.id}</div>
                       <div className="text-xs text-[var(--text-2)]">{sku.name}</div>
                       {m.perishable && <Badge tone="warn">Perishable</Badge>}

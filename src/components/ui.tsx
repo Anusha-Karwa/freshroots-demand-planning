@@ -68,7 +68,8 @@ export function StatusLight({ status, label }: { status: Light; label?: string }
 export function Flash({ msg, err }: { msg?: string; err?: string }) {
   if (!msg && !err) return null;
   return (
-    <div role="status" className={`mb-4 rounded-md px-3 py-2 ${err ? TONES.bad : TONES.good}`}>
+    // Sticky, so the result stays visible when the page scrolls back to the row that was decided.
+    <div role="status" className={`sticky top-2 z-20 mb-4 rounded-md px-3 py-2 shadow-sm ${err ? TONES.bad : TONES.good}`}>
       {err ?? msg}
     </div>
   );
@@ -88,7 +89,7 @@ export function Button({ children, variant = "primary", ...props }: React.Button
 }
 
 export function TextLink({ href, children }: { href: string; children: ReactNode }) {
-  return <Link href={href} className="text-[var(--series-1)] underline-offset-2 hover:underline">{children}</Link>;
+  return <Link href={href} prefetch={false} className="text-[var(--series-1)] underline-offset-2 hover:underline">{children}</Link>;
 }
 
 export function MockTag() {

@@ -68,6 +68,6 @@ input[type="checkbox"] { padding: 0; }
 input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
 
 table.data { width: 100%; border-collapse: collapse; }
-table.data th { text-align: left; font-weight: 600; color: var(--text-2); font-size: 12px; padding: 6px 8px; border-bottom: 1px solid var(--border); white-space: nowrap; }
-table.data td { padding: 8px; border-bottom: 1px solid var(--border); vertical-align: top; }
+table.data th { text-align: left; font-weight: 600; color: var(--text-2); font-size: 12px; padding: 6px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+table.data td { padding: 8px 6px; border-bottom: 1px solid var(--border); vertical-align: top; }
 table.data td.r, table.data th.r { text-align: right; }
