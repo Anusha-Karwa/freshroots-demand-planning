@@ -326,6 +326,18 @@ main{position:relative;z-index:2}
 .tile2 .warn{position:absolute;inset:8cqh 8cqw;font-weight:900;font-variation-settings:"wdth" 70;font-size:min(17cqw,21cqh);line-height:.92;color:var(--lantern);text-transform:uppercase}
 .tile2 .stk{position:absolute;padding:.35em .7em;border-radius:.4em;font-weight:900;font-variation-settings:"wdth" 80;font-size:max(12px,min(8cqw,9cqh));letter-spacing:.02em;text-transform:uppercase;background:#fff;color:#2b1360;transform:rotate(-14deg)}
 .tile2 svg.chev{position:absolute;inset:0;width:100%;height:100%}
+.snap-title{position:absolute;left:33vw;top:72vh;width:16vw;display:grid;gap:6px;transition:opacity .6s,transform .8s cubic-bezier(.2,.8,.2,1);z-index:2}
+.snap-title .mono{color:var(--lantern)}
+.snap-title h2{margin:0;font-size:clamp(34px,3.6vw,60px);line-height:.95;font-weight:700;font-variation-settings:"wdth" 112;letter-spacing:-.035em}
+.snap-title h2 em{font-family:var(--f-accent);font-weight:500;color:#ffcf8a}
+.snap-title p{margin:0;color:var(--mist);font-size:13px}
+.flt{position:absolute;z-index:3;pointer-events:auto;will-change:transform,opacity;filter:drop-shadow(0 24px 26px rgba(0,0,0,.5))}
+.flt img{width:100%;height:100%;object-fit:contain;transition:transform .9s cubic-bezier(.2,.8,.2,1)}
+.flt:hover img{transform:rotate(360deg) scale(1.15)}
+.flt::after{content:"";position:absolute;left:15%;right:15%;bottom:-14%;height:12%;border-radius:50%;background:radial-gradient(rgba(255,176,74,.35),transparent 70%);filter:blur(4px)}
+.tile2{transition:box-shadow .4s}
+.tile2:hover{box-shadow:0 30px 70px rgba(0,0,0,.55),0 0 0 2px rgba(255,207,138,.6)}
+@media (max-width:700px){.snap-title{display:none}}
 .snap-cap{position:absolute;left:50%;bottom:max(4vh,calc(env(safe-area-inset-bottom,0px) + 20px));transform:translateX(-50%);color:var(--mist);white-space:nowrap;transition:opacity .5s}
 
 /* ---------- manifesto inline image ---------- */
@@ -524,7 +536,7 @@ main{position:relative;z-index:2}
     </div></div>
   </section>
   <section id="snaps" aria-label="How I work">
-    <div class="stick" id="snapstage"><div class="snap-cap mono" id="snapcap">[ ! ] How I work</div></div>
+    <div class="stick" id="snapstage"><div class="snap-title" id="snapcap"><span class="mono">[ ! ] Five habits, one lantern</span><h2>How I <em>work</em></h2><p>Hover the tiles. Chase the floating things with your cursor.</p></div></div>
   </section>
   <!-- 3 -->
   <section id="manifesto" aria-label="What I believe">
@@ -699,6 +711,16 @@ var TILES=[
  {d:[80,50,16,34],m:[26,82,48,11],dx:60,dy:70,r0:18,r:3,de:.4,bg:'linear-gradient(160deg,#ff7a3d,#7a2a10)',h:'<b class="big">Lead</b><span class="cap">People first, then process</span><img data-icon="trophy" alt="">'}
 ];
 var BAND='Engineer · Builder · Seller · Storyteller · ';
+var FLOATS=[
+ {i:'lantern',d:[27,0,10],m:[40,2,16],dx:-30,dy:-40,de:.05,sp:1.1},
+ {i:'rocket',d:[72,38,10],m:[80,33,15],dx:40,dy:20,de:.14,sp:.8},
+ {i:'shuttle',d:[48,76,12],m:[2,77,15],dx:10,dy:60,de:.22,sp:1.3},
+ {i:'brush',d:[92,26,9],m:[84,56,14],dx:40,dy:0,de:.18,sp:.9},
+ {i:'plane',d:[0,40,10],m:[83,3,15],dx:-40,dy:10,de:.1,sp:1.5},
+ {i:'pot',d:[26,80,9],m:[60,90,0],dx:-20,dy:50,de:.3,sp:1},
+ {i:'trophy',d:[71,78,10],m:[0,0,0],dx:30,dy:50,de:.34,sp:1.2}
+];
+var smx=0,smy=0,tmx=0,tmy=0;addEventListener('pointermove',function(e){tmx=e.clientX/innerWidth-.5;tmy=e.clientY/innerHeight-.5},{passive:true});
 var CHIPS=[
  {t:'Payments',i:'card',g:'#work',n:'Where code meets money. The work cards start with it.'},
  {t:'AI & data',i:'doc',g:'#projects',n:'Models, pipelines and an AI legal assistant, in the builds.'},
@@ -1260,6 +1282,9 @@ var belts=[{el:$('#belt1'),x:0,dir:-1},{el:$('#belt2'),x:0,dir:1}];
 var cards=Array.prototype.slice.call(document.querySelectorAll('.card'));
 var scards=Array.prototype.slice.call(document.querySelectorAll('.scard'));
 var tiles=Array.prototype.slice.call(document.querySelectorAll('.tile2'));
+$('#snapstage').insertAdjacentHTML('beforeend',FLOATS.map(function(f){return '<div class="flt"><img data-icon="'+f.i+'" alt=""></div>'}).join(''));
+var flts=Array.prototype.slice.call(document.querySelectorAll('.flt'));
+tiles.forEach(function(el){el.addEventListener('pointermove',function(e){if(e.pointerType!=='mouse')return;var r=el.getBoundingClientRect();el.dataset.tx=((e.clientY-r.top)/r.height-.5)*-10;el.dataset.ty=((e.clientX-r.left)/r.width-.5)*12});el.addEventListener('pointerleave',function(){el.dataset.tx=0;el.dataset.ty=0})});
 var w2=$('#wave2'),w2l=Array.prototype.slice.call(w2.querySelectorAll('span')),w2W=1;
 var topEl=$('#top'),menuOpen=false;
 (function(){var out=$('#chipOut'),def=out.innerHTML;Array.prototype.forEach.call(document.querySelectorAll('.chip'),function(b){var c=CHIPS[+b.dataset.i];
@@ -1301,8 +1326,12 @@ function update(t,dt){
   // collage tiles fly in from every side
   var pc=clamp((y-SEC.snaps.top+vh*.8)/(SEC.snaps.h-vh*.2),0,1);if(y+vh>SEC.snaps.top&&y<SEC.snaps.top+SEC.snaps.h){var mob=vw<700;tiles.forEach(function(el,k){var T=TILES[k],g=mob?T.m:T.d;var q=clamp((pc-T.de*.8)/.3,0,1);q=1-Math.pow(1-q,3);
     el.style.left=g[0]+'vw';el.style.top=g[1]+'vh';el.style.width=g[2]+'vw';el.style.height=g[3]+'vh';
-    el.style.transform='translate3d('+(T.dx*(1-q))+'vw,'+(T.dy*(1-q)-pc*4*(k%3))+'vh,0) rotate('+lerp(T.r0,T.r,q)+'deg) scale('+lerp(.75,1,q)+')';el.style.opacity=q>0?Math.min(1,q*3):0});
-    $('#snapcap').style.opacity=pc>.5?1:0}
+    el.style.transform='perspective(800px) translate3d('+(T.dx*(1-q))+'vw,'+(T.dy*(1-q)-pc*4*(k%3))+'vh,0) rotate('+lerp(T.r0,T.r,q)+'deg) rotateX('+(+el.dataset.tx||0)+'deg) rotateY('+(+el.dataset.ty||0)+'deg) scale('+lerp(.75,1,q)+')';el.style.opacity=q>0?Math.min(1,q*3):0});
+    $('#snapcap').style.opacity=pc>.42?1:0;$('#snapcap').style.transform=pc>.42?'none':'translateY(30px)';
+    smx+=(tmx-smx)*Math.min(1,dt*4);smy+=(tmy-smy)*Math.min(1,dt*4);
+    flts.forEach(function(el,k){var F=FLOATS[k],g=mob?F.m:F.d;if(!g[2]){el.style.opacity=0;return}var q=clamp((pc-F.de)/.3,0,1);q=1-Math.pow(1-q,3);var bob=Math.sin(t*F.sp+k)*1.2,rot=Math.sin(t*F.sp*.7+k*2)*10;
+      el.style.left=g[0]+'vw';el.style.top=g[1]+'vh';el.style.width=g[2]+'vw';el.style.height=g[2]+'vw';
+      el.style.transform='translate3d(calc('+(F.dx*(1-q))+'vw + '+(smx*-40*(1+k%3))+'px),calc('+(F.dy*(1-q)+bob)+'vh + '+(smy*-30*(1+k%3))+'px),0) rotate('+(rot+(1-q)*90)+'deg) scale('+(.3+.7*q)+')';el.style.opacity=q});}
   // wavy band slides sideways as it passes
   var sb=SEC.band;if(y+vh>sb.top&&y<sb.top+sb.h){var bq=clamp((y+vh-sb.top)/(vh+sb.h),0,1);w2.style.transform='translate3d('+(-bq*(w2W-vw))+'px,0,0)';var bamp=RM?0:(14+Math.min(Math.abs(vel),40)*1.1);for(var bi=0;bi<w2l.length;bi++){var bph=bi*.5+t*2.2+bq*12;w2l[bi].style.transform='translate3d(0,'+(Math.sin(bph)*bamp).toFixed(1)+'px,0) rotate('+(Math.cos(bph)*6).toFixed(1)+'deg)'}}
   // projects rise in staggered columns
@@ -1327,7 +1356,7 @@ function update(t,dt){
 }
 
 /* click anywhere (not on a control) to release a sky lantern */
-addEventListener('click',function(e){if(!World)return;if(menuOpen||e.target.closest('.daily,a,button,.track,.card,.proj,.scard,.tile2,.lcard,.ico,.ctrl,.menu'))return;World.release(e.clientX,e.clientY);released=true;Sound.note(783.99,.05,2.4)});
+addEventListener('click',function(e){if(!World)return;if(menuOpen||e.target.closest('.flt,.daily,a,button,.track,.card,.proj,.scard,.tile2,.lcard,.ico,.ctrl,.menu'))return;World.release(e.clientX,e.clientY);released=true;Sound.note(783.99,.05,2.4)});
 
 /* =========================================================
    5. BOOT
