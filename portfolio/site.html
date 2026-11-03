@@ -388,7 +388,13 @@ h1.nm2{text-shadow:0 2px 30px rgba(50,10,45,.55),0 0 50px rgba(255,170,90,.25)}
 .f-giant{display:flex;justify-content:space-between;font-weight:800;font-variation-settings:"wdth" 125;font-size:16.2vw;line-height:.74;letter-spacing:0;color:var(--ink);opacity:.95;padding-bottom:max(2vh,env(safe-area-inset-bottom,0px))}
 .f-giant span{display:inline-block;transition:transform .6s cubic-bezier(.34,1.56,.64,1),color .3s}
 .f-giant span:hover{transform:translateY(-8%) rotate(-3deg);color:var(--lantern)}
-.sign{margin-top:10vh}
+.sign{margin-top:10vh;padding-bottom:3vh}
+.fend{padding-bottom:max(4vh,calc(env(safe-area-inset-bottom,0px) + 70px));display:grid;gap:18px}
+.fline{position:relative;height:1px;background:linear-gradient(90deg,transparent,rgba(255,207,138,.55),transparent)}
+.flan{position:absolute;left:50%;top:-7px;width:11px;height:15px;margin-left:-5px;border-radius:5px 5px 6px 6px;background:linear-gradient(#ffe2a8,#ff8a3d);box-shadow:0 0 16px 5px rgba(255,176,74,.5);animation:breathe 3.2s ease-in-out infinite}
+.frow{display:flex;justify-content:space-between;gap:12px 24px;flex-wrap:wrap;color:var(--mist);font-size:10.5px}
+.frow a{text-decoration:none;color:#ffcf8a}
+.frow a:hover{color:var(--lantern)}
 
 /* ---------- responsive ---------- */
 @media (max-width:900px){
@@ -650,7 +656,10 @@ h1.nm2{text-shadow:0 2px 30px rgba(50,10,45,.55),0 0 50px rgba(255,170,90,.25)}
       <button class="lightbtn" id="lightBtn"><span class="wick"></span>Light a lantern before you go</button>
       <div class="sig">Anusha Karwa<svg viewBox="0 0 300 30" preserveAspectRatio="none" aria-hidden="true"><path pathLength="1" d="M4 20 C 60 4, 120 30, 180 14 S 270 6, 296 18"/></svg></div>
     </div>
-    <div class="wrap f-giant" aria-hidden="true"><span>K</span><span>A</span><span>R</span><span>W</span><span>A</span></div>
+    <div class="wrap fend">
+      <div class="fline"><span class="flan"></span></div>
+      <div class="frow mono"><span>© 2026 Anusha Karwa</span><span>Made with lanterns in Pune</span><a href="#name" data-go="#name">Back to the sunset ↑&#xFE0E;</a></div>
+    </div>
   </footer>
 </main>
 
