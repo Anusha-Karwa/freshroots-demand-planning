@@ -6,15 +6,21 @@ A single-page, scroll-driven portfolio set in a night meadow: sky lanterns, a ri
 - `site.html` is the source (page body without the document wrapper). Edit this one, then run `./build.sh` to regenerate `index.html`.
 - Add `?lite` to the URL to force the low-power scene (fewer grass blades, lower resolution).
 
-## What scroll does
-1. **Story**: the intro sentence writes itself word by word in a centred, mixed-type layout, with 3D objects popping in inline. A vertical lantern rope on the left shows progress and can be dragged. Hover an object to make it spin inside a glow and read its caption.
-2. **Camera**: the 3D camera drifts in the sky during the story, then descends into the meadow and travels upstream to the waterfall by the footer.
-3. **Name / manifesto / trail**: a giant wordmark with a rippling reflection on a glowing horizon, a paragraph that lights up word by word, and two marquees that speed up with scroll velocity.
-4. **Work**: tilted postcard-style cards (details on the left, visual on the right) that stack, shrink and dim as the next one covers them.
-5. **Projects**: cards rise into place in staggered columns.
-6. **Roots**: education as stepping stones along a glowing line.
-7. **Lanterns I've lit**: achievements on a 3D rotating drum, with a hanging lantern card that shows the active item.
-8. **Invitation**: letters rise out of the river one by one and settle into a glowing line.
-9. **Footer**: contact links, a "light a lantern" button that releases lanterns into the sky, and a hand-drawn signature, with the waterfall behind.
+## What scroll does (top to bottom)
+1. **Loader**: a lantern fills with light while a rolling counter runs to 100.
+2. **Header**: studio-style columns and a "Let's talk" button; after the hero it collapses to a hamburger that opens a full-screen menu.
+3. **Name**: a giant wordmark with a rippling reflection on a glowing horizon.
+4. **Story**: the intro sentence writes itself word by word with 3D objects inline. Hovering an object dims the rest and shows a caption. The lantern rope on the left shows progress and can be dragged.
+5. **What I bring**: four service-style cards that rise in staggered columns.
+6. **Trail**: two logo marquees that speed up with scroll, then a short "Building useful things, daily" interlude with a link.
+7. **Proof collage**: eight tiles (stickers, a warning sign, an arrow block, big numbers) fly in from every side.
+8. **Manifesto**: a paragraph with an inline image that lights up word by word.
+9. **Work**: tilted postcard cards that stack, shrink and dim as the next one covers them.
+10. **Wavy band**: "Engineer · Builder · Seller · Storyteller" slides sideways with wobbling letters.
+11. **Builds**: project cards that rise in staggered columns.
+12. **Roots**: education as stepping stones along a glowing line.
+13. **Lanterns I've lit**: a huge heading with a featured list, then achievements on a 3D drum with a hanging card.
+14. **Invitation**: letters rise out of the river one by one.
+15. **Footer**: "Build it once. Build it right.", contact links, a light-a-lantern button, a signature and a giant "KARWA".
 
-Extras: the hanging lantern (bottom left) toggles generated ambient sound (river, wind, chimes, crickets) and the moon toggles night/dawn. Click anywhere in the sky to release a lantern, or use "Light a lantern before you go" in the footer.
+The 3D camera stays in the sky until the story ends, then descends into the meadow and travels upstream to the waterfall. The hanging lantern (bottom left) toggles generated ambient sound, the moon toggles night/dawn, and clicking the sky releases a lantern.
