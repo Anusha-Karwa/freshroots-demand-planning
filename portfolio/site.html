@@ -1061,7 +1061,7 @@ function buildWorld(canvas){
   // --- lights for standard materials
   var hemi=new T.HemisphereLight(0x46679a,0x0a1208,.42);scene.add(hemi);
   var moonL=new T.DirectionalLight(0xb9ccff,.75);moonL.position.copy(MOON).normalize();scene.add(moonL);
-  var warm=new T.PointLight(0xff9a40,2.2,26,1.6);scene.add(warm);
+  var WARM=[0,1,2].map(function(){var l=new T.PointLight(0xff9a40,2.4,22,1.4);scene.add(l);return l});
 
   // --- terrain
   var TW=320,TZ0=70,TZ1=-380,SX=MOBILE?110:170,SZ=MOBILE?190:300;
@@ -1101,15 +1101,19 @@ function buildWorld(canvas){
   // --- glow-point shader shared by lanterns, fireflies, diyas, mist, flowers
   function glowMat(add,soft){return new T.ShaderMaterial({transparent:true,depthWrite:false,blending:add?T.AdditiveBlending:T.NormalBlending,uniforms:{time:U.time,px:U.px,glow:U.glow,fogColor:U.fogColor,fogDensity:U.fogDensity},
     vertexShader:'attribute float size,phase;attribute vec3 color;uniform float time,px;varying vec3 vC;varying float vA;'+FOG_V+'void main(){vec4 mv=modelViewMatrix*vec4(position,1.);gl_Position=projectionMatrix*mv;vFogD=-mv.z;float f=.82+.18*sin(time*6.+phase*13.)*sin(time*2.3+phase*5.);vA=f;vC=color;gl_PointSize=min(size*px*240./max(-mv.z,.5)*f,'+(MOBILE?'120.':'180.')+');}',
-    fragmentShader:'uniform float glow;varying vec3 vC;varying float vA;'+FOG_F+'void main(){float d=length(gl_PointCoord-.5)*2.;'+(soft?'float a=exp(-d*d*3.5)*.85+exp(-d*d*40.)*.9;':'float a=smoothstep(1.,.2,d);')+'float fo=1.-exp(-fogDensity*fogDensity*vFogD*vFogD*.35);a*=(1.-fo*.85)*vA;gl_FragColor=vec4(vC*glow,a);}'})}
+    fragmentShader:'uniform float glow;varying vec3 vC;varying float vA;'+FOG_F+'void main(){float d=length(gl_PointCoord-.5)*2.;'+(soft===2?'float a=exp(-d*d*2.6)*.55;':soft?'float a=exp(-d*d*3.5)*.85+exp(-d*d*40.)*.9;':'float a=smoothstep(1.,.2,d);')+'float fo=1.-exp(-fogDensity*fogDensity*vFogD*vFogD*.35);a*=(1.-fo*.85)*vA;gl_FragColor=vec4(vC*glow,a);}'})}
   function pointsLayer(n,add,soft){var g=new T.BufferGeometry();var P=new Float32Array(n*3),S=new Float32Array(n),Ph=new Float32Array(n),C=new Float32Array(n*3);g.setAttribute('position',new T.BufferAttribute(P,3));g.setAttribute('size',new T.BufferAttribute(S,1));g.setAttribute('phase',new T.BufferAttribute(Ph,1));g.setAttribute('color',new T.BufferAttribute(C,3));var p=new T.Points(g,glowMat(add,soft));p.frustumCulled=false;scene.add(p);return {g:g,P:P,S:S,Ph:Ph,C:C,obj:p}}
 
   // --- sky lanterns (bodies + glow)
-  var NS=MOBILE?40:80,SKY=[];var lanTex=(function(){var c=document.createElement('canvas');c.width=8;c.height=64;var x=c.getContext('2d');var g=x.createLinearGradient(0,0,0,64);g.addColorStop(0,'#ffe9b0');g.addColorStop(.5,'#ffa040');g.addColorStop(1,'#c2401a');x.fillStyle=g;x.fillRect(0,0,8,64);var t=new T.CanvasTexture(c);t.encoding=T.sRGBEncoding;return t})();
-  var lg=new T.CylinderGeometry(.42,.3,1,10,1,true);
-  var lm=new T.MeshBasicMaterial({map:lanTex,side:T.DoubleSide,fog:true,transparent:true,opacity:.95});
+  function paperTex(ribs,top,mid,low,band){var c=document.createElement('canvas');c.width=128;c.height=128;var x=c.getContext('2d');var g=x.createLinearGradient(0,128,0,0);g.addColorStop(0,low);g.addColorStop(.45,mid);g.addColorStop(1,top);x.fillStyle=g;x.fillRect(0,0,128,128);
+    var rg=x.createRadialGradient(64,118,4,64,118,90);rg.addColorStop(0,'rgba(255,250,220,.85)');rg.addColorStop(1,'rgba(255,200,120,0)');x.fillStyle=rg;x.fillRect(0,0,128,128);
+    x.globalAlpha=.18;for(var i=0;i<ribs;i++){x.fillStyle='#5a1a08';x.fillRect(i*128/ribs,0,1.5,128)}x.globalAlpha=.12;for(var k=0;k<160;k++){x.fillStyle=Math.random()<.5?'#fff':'#7a2a10';x.fillRect(Math.random()*128,Math.random()*128,1,Math.random()*6)}
+    x.globalAlpha=1;if(band){x.fillStyle=band;x.fillRect(0,0,128,10);x.fillRect(0,120,128,8)}var t=new T.CanvasTexture(c);t.encoding=T.sRGBEncoding;return t}
+  var NS=MOBILE?40:80,SKY=[];
+  var lg=new T.LatheGeometry([[.24,-.5],[.3,-.38],[.37,-.12],[.42,.15],[.43,.36],[.38,.48],[.08,.53]].map(function(q){return new T.Vector2(q[0],q[1])}),14);
+  var lm=new T.MeshBasicMaterial({map:paperTex(10,'#d9541f','#ff9a3a','#ffe7a6','#7a2a10'),side:T.DoubleSide,fog:true});
   var skyBodies=new T.InstancedMesh(lg,lm,NS+40);skyBodies.frustumCulled=false;scene.add(skyBodies);
-  var skyGlow=pointsLayer(NS+40,true,true);
+  var skyHalo=pointsLayer(NS+40,true,2),skyGlow=pointsLayer(NS+40,true,true),skyCore=pointsLayer(NS+40,true,true);
   function spawnSky(L,init,at){var z=init?TZ0-Math.random()*(TZ0-CLIFF_B+30):camera.position.z-30-Math.random()*120;var x=rx(z)+(Math.random()-.5)*110;
     L.x=at?at.x:x;L.z=at?at.z:z;L.y=at?at.y:(init?hgt(L.x,L.z)+Math.random()*130:hgt(L.x,L.z)+1);L.v=.9+Math.random()*1.6;L.ph=Math.random()*6.28;L.s=.8+Math.random()*.7;L.user=!!at;return L}
   for(var si=0;si<NS;si++)SKY.push(spawnSky({},true));
@@ -1118,10 +1122,18 @@ function buildWorld(canvas){
   // --- bank lantern posts
   var POSTS=[];(function(){var step=15,z,i=0;for(z=TZ0-6;z>CLIFF_A+4;z-=step){[-1,1].forEach(function(s){var zz=z+(s>0?step/2:0);var x=rx(zz)+s*(8.2+noise2(zz,1)*2);POSTS.push(new T.Vector3(x,hgt(x,zz),zz))});i++}})();
   var pg=new T.CylinderGeometry(.05,.07,2.4,6);pg.translate(0,1.2,0);var poles=new T.InstancedMesh(pg,new T.MeshLambertMaterial({color:0x1a1410}),POSTS.length);
-  var boxG=new T.BoxGeometry(.38,.5,.38);var boxes=new T.InstancedMesh(boxG,new T.MeshBasicMaterial({color:0xffa24a}),POSTS.length);
-  POSTS.forEach(function(p,i){o3.position.copy(p);o3.rotation.set(0,0,0);o3.scale.set(1,1,1);o3.updateMatrix();poles.setMatrixAt(i,o3.matrix);o3.position.y+=2.15;o3.updateMatrix();boxes.setMatrixAt(i,o3.matrix)});
-  scene.add(poles,boxes);
-  var postGlow=pointsLayer(POSTS.length,true,true);POSTS.forEach(function(p,i){postGlow.P.set([p.x,p.y+2.2,p.z],i*3);postGlow.S[i]=5.5;postGlow.Ph[i]=Math.random()*9;postGlow.C.set([1,.62,.25],i*3)});
+  var LAMPS=POSTS.map(function(p){var dir=Math.sign(rx(p.z)-p.x)||1;return new T.Vector3(p.x+dir*.62,p.y+2.02,p.z)});
+  var armG=new T.BoxGeometry(.7,.05,.05);var arms=new T.InstancedMesh(armG,new T.MeshLambertMaterial({color:0x1a1410}),POSTS.length);
+  var rlG=new T.LatheGeometry([[.05,-.34],[.2,-.3],[.3,-.16],[.33,0],[.3,.16],[.2,.3],[.05,.34]].map(function(q){return new T.Vector2(q[0],q[1])}),16);
+  var boxes=new T.InstancedMesh(rlG,new T.MeshBasicMaterial({map:paperTex(8,'#c8331c','#ff7a35','#ffd88a','#3a1206'),fog:true}),POSTS.length);
+  var poolTex=(function(){var c=document.createElement('canvas');c.width=c.height=128;var x=c.getContext('2d');var g=x.createRadialGradient(64,64,0,64,64,64);g.addColorStop(0,'rgba(255,200,120,.9)');g.addColorStop(.3,'rgba(255,150,70,.4)');g.addColorStop(1,'rgba(255,120,40,0)');x.fillStyle=g;x.fillRect(0,0,128,128);return new T.CanvasTexture(c)})();
+  var poolG=new T.PlaneGeometry(1,1);poolG.rotateX(-Math.PI/2);
+  var poolM=new T.MeshBasicMaterial({map:poolTex,transparent:true,depthWrite:false,blending:T.AdditiveBlending,fog:true,polygonOffset:true,polygonOffsetFactor:-2});
+  var pools=new T.InstancedMesh(poolG,poolM,POSTS.length);pools.renderOrder=2;
+  POSTS.forEach(function(p,i){var Lp=LAMPS[i];o3.position.copy(p);o3.rotation.set(0,0,0);o3.scale.set(1,1,1);o3.updateMatrix();poles.setMatrixAt(i,o3.matrix);o3.position.set((p.x+Lp.x)/2,p.y+2.38,p.z);o3.updateMatrix();arms.setMatrixAt(i,o3.matrix);o3.position.set(Lp.x,Lp.y+.1,Lp.z);o3.scale.set(1,1.15,1);o3.updateMatrix();pools.setMatrixAt(i,(function(){var m=new T.Matrix4();var s=8+Math.random()*2;m.makeScale(s,1,s);m.setPosition(Lp.x,hgt(Lp.x,Lp.z)+.3,Lp.z);return m})());o3.scale.set(1,1.15,1);o3.updateMatrix();boxes.setMatrixAt(i,o3.matrix)});
+  [poles,arms,boxes,pools].forEach(function(m){m.frustumCulled=false});scene.add(poles,arms,boxes,pools);
+  var postHalo=pointsLayer(POSTS.length,true,2);LAMPS.forEach(function(p,i){postHalo.P.set([p.x,p.y,p.z],i*3);postHalo.S[i]=16;postHalo.Ph[i]=i*1.7;postHalo.C.set([.9,.38,.12],i*3)});
+  var postGlow=pointsLayer(POSTS.length,true,true);LAMPS.forEach(function(p,i){postGlow.P.set([p.x,p.y,p.z],i*3);postGlow.S[i]=4.6;postGlow.Ph[i]=Math.random()*9;postGlow.C.set([1,.62,.25],i*3)});
 
   // --- river ribbon (one sheet: calm river, then a steep waterfall)
   var water;(function(){var zs=[];var z=TZ0;while(z>TZ1){zs.push(z);z-=(z<CLIFF_A+3&&z>CLIFF_B-3)?.35:1.2}
@@ -1181,16 +1193,18 @@ function buildWorld(canvas){
     skyMat.uniforms.sunAmt.value=sk;skyMat.uniforms.sunDir.value.set(-.12,lerp(-.06,.05,sk),-1).normalize();moon.material.opacity=1-sk*.9;
     World_stars.uniforms.vis.value=(1-dawn*.75)*(1-sk);hemi.color.copy(HEMI_N).lerp(HEMI_S,sk);hemi.intensity=.42+dawn*.5+sk*.5;moonL.color.copy(MOON_N).lerp(MOON_S,sk);moonL.intensity=.75+dawn*.4+sk*.35;
     // nearest lamps feed grass + water warmth
-    var cp=camera.position;POSTS.sort(function(a,b){return a.distanceToSquared(cp)-b.distanceToSquared(cp)});
-    for(var i=0;i<NL;i++){var p=POSTS[i];lampU.value[i].set(p.x,p.y+2.2,p.z)}
-    warm.position.set(POSTS[0].x,POSTS[0].y+2.4,POSTS[0].z);
+    var cp=camera.position;var LS=LAMPS.slice().sort(function(a,b){return a.distanceToSquared(cp)-b.distanceToSquared(cp)});
+    for(var i=0;i<NL;i++){var p=LS[i];lampU.value[i].set(p.x,p.y,p.z)}
+    WARM.forEach(function(l,k){l.position.copy(LS[k]);l.intensity=(2.2+Math.sin(t*9+k*2)*.25+Math.sin(t*23+k)*.12)*U.glow.value});poolM.opacity=.9+Math.sin(t*7)*.06;
     // sky lanterns
     var cnt=0;for(i=0;i<SKY.length;i++){var L=SKY[i];if(!L)continue;L.y+=L.v*dt*(L.user?1.4:1);var sw=Math.sin(t*.5+L.ph)*.6;var x=L.x+sw,z=L.z+Math.cos(t*.4+L.ph)*.4;
       if(!L.user&&(L.y>hgt(L.x,L.z)+150||L.z>cp.z+30)){spawnSky(L,false);L.y=hgt(L.x,L.z)+Math.random()*8}
       if(L.user&&L.y>cp.y+160){SKY[i]=null;continue}
       o3.position.set(x,L.y,z);o3.rotation.set(Math.sin(t+L.ph)*.08,0,Math.cos(t*.8+L.ph)*.08);o3.scale.set(L.s,L.s*1.1,L.s);o3.updateMatrix();skyBodies.setMatrixAt(cnt,o3.matrix);
-      skyGlow.P[cnt*3]=x;skyGlow.P[cnt*3+1]=L.y-.15;skyGlow.P[cnt*3+2]=z;skyGlow.S[cnt]=L.s*4.2;skyGlow.Ph[cnt]=L.ph;skyGlow.C[cnt*3]=1;skyGlow.C[cnt*3+1]=.58;skyGlow.C[cnt*3+2]=.22;cnt++}
-    skyBodies.count=cnt;skyBodies.instanceMatrix.needsUpdate=true;skyGlow.g.setDrawRange(0,cnt);skyGlow.g.attributes.position.needsUpdate=true;skyGlow.g.attributes.size.needsUpdate=true;skyGlow.g.attributes.color.needsUpdate=true;skyGlow.g.attributes.phase.needsUpdate=true;
+      skyGlow.P[cnt*3]=x;skyGlow.P[cnt*3+1]=L.y;skyGlow.P[cnt*3+2]=z;skyGlow.S[cnt]=L.s*5;skyGlow.Ph[cnt]=L.ph;skyGlow.C[cnt*3]=1;skyGlow.C[cnt*3+1]=.55;skyGlow.C[cnt*3+2]=.2;
+      skyHalo.P[cnt*3]=x;skyHalo.P[cnt*3+1]=L.y;skyHalo.P[cnt*3+2]=z;skyHalo.S[cnt]=L.s*17;skyHalo.Ph[cnt]=L.ph;skyHalo.C[cnt*3]=.85;skyHalo.C[cnt*3+1]=.34;skyHalo.C[cnt*3+2]=.1;
+      skyCore.P[cnt*3]=x;skyCore.P[cnt*3+1]=L.y-.42*L.s;skyCore.P[cnt*3+2]=z;skyCore.S[cnt]=L.s*1.6;skyCore.Ph[cnt]=L.ph+2;skyCore.C[cnt*3]=1;skyCore.C[cnt*3+1]=.93;skyCore.C[cnt*3+2]=.7;cnt++}
+    skyBodies.count=cnt;skyBodies.instanceMatrix.needsUpdate=true;[skyGlow,skyHalo,skyCore].forEach(function(L){L.g.setDrawRange(0,cnt);var A=L.g.attributes;A.position.needsUpdate=A.size.needsUpdate=A.color.needsUpdate=A.phase.needsUpdate=true});
     // diyas drift downstream
     for(i=0;i<ND;i++){var D=DY[i];D.z+=D.v*dt;if(D.z>TZ0-2)D.z=CLIFF_A+6;var dx=rx(D.z)+D.o+Math.sin(t*.7+D.ph)*.3;diya.P[i*3]=dx;diya.P[i*3+1]=-.35;diya.P[i*3+2]=D.z;diya.S[i]=1.8;diya.Ph[i]=D.ph;diya.C.set([1,.6,.22],i*3);
       var j=ND+i;diya.P[j*3]=dx;diya.P[j*3+1]=-.75;diya.P[j*3+2]=D.z+.25;diya.S[j]=1.3;diya.Ph[j]=D.ph+1;diya.C.set([.5,.28,.1],j*3)}
