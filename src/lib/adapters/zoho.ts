@@ -61,7 +61,8 @@ export class ZohoClient {
   /** Calls the Inventory API. Retries 429 / 5xx with backoff and re-authenticates once on 401. */
   async request<T = Record<string, unknown>>(method: string, path: string, body?: unknown, query: Record<string, string> = {}): Promise<T> {
     const url = new URL(`${this.cfg.apiBase}${path}`);
-    url.searchParams.set("organization_id", this.cfg.orgId);
+    // GET /organizations lists every organisation the token can see; a wrong organization_id would make it fail too.
+    if (path !== "/organizations") url.searchParams.set("organization_id", this.cfg.orgId);
     for (const [k, v] of Object.entries(query)) url.searchParams.set(k, v);
     let reauthed = false;
     for (let attempt = 0; ; attempt++) {
@@ -134,14 +135,17 @@ export class ZohoClient {
 }
 
 // One client per process, so the access token is reused until it expires. Every call is logged to zoho_api_log.
+const env = (name: string) => (process.env[name] ?? "").trim();
+
 let shared: { client: ZohoClient; logTo: { db?: Db } } | null = null;
 
 export function liveClient(db?: Db): ZohoClient {
   if (!shared) {
     const logTo: { db?: Db } = {};
     const client = new ZohoClient({
-      clientId: process.env.ZOHO_CLIENT_ID!, clientSecret: process.env.ZOHO_CLIENT_SECRET!, refreshToken: process.env.ZOHO_REFRESH_TOKEN!,
-      orgId: process.env.ZOHO_ORGANIZATION_ID!, accountsUrl: zohoAccountsUrl(), apiBase: zohoApiBase(),
+      // Values pasted into Vercel often carry a stray space or newline; Zoho rejects them untrimmed.
+      clientId: env("ZOHO_CLIENT_ID"), clientSecret: env("ZOHO_CLIENT_SECRET"), refreshToken: env("ZOHO_REFRESH_TOKEN"),
+      orgId: env("ZOHO_ORGANIZATION_ID"), accountsUrl: zohoAccountsUrl(), apiBase: zohoApiBase(),
     }, async (e) => {
       if (logTo.db) await logTo.db.insert(schema.zohoApiLog).values(e).catch(() => undefined);
     });

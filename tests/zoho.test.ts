@@ -30,6 +30,12 @@ const input = {
 };
 
 describe("Zoho client", () => {
+  it("lists organisations without sending organization_id, so a wrong id can still be diagnosed", async () => {
+    const { client, calls } = fakeZoho([token(), () => ({ status: 200, body: { code: 0, organizations: [{ organization_id: "60012345678", name: "Freshroots" }] } })]);
+    expect(await client.organizations()).toEqual([{ organization_id: "60012345678", name: "Freshroots" }]);
+    expect(calls[1].url).toBe("https://www.zohoapis.in/inventory/v1/organizations");
+  });
+
   it("refreshes a token, creates a draft PO, and caches the token", async () => {
     const { client, calls, logs } = fakeZoho([token(), po(), po()]);
     const r = await client.createDraftPurchaseOrder(input);
