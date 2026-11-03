@@ -69,7 +69,8 @@ main{position:relative;z-index:2}
 .top{align-items:flex-start}
 .hcols{display:flex;gap:clamp(22px,4.5vw,72px);align-items:flex-start;font-size:13px;line-height:1.4;transition:opacity .45s,transform .45s}
 .hcols .c{display:grid;gap:1px}
-.hcols .c span{color:var(--mist)}
+.hcols .c span{color:#e9e2f0}
+.hcols,.brand{text-shadow:0 1px 10px rgba(30,10,40,.6)}
 .hcols a{text-decoration:none;transition:color .25s}
 .hcols .c a:hover{color:var(--lantern)}
 .htalk{display:inline-flex;align-items:center;gap:8px;padding:10px 16px;border-radius:6px;background:var(--ink);color:var(--night)!important;font-weight:600;transition:background .3s}
@@ -112,8 +113,9 @@ main{position:relative;z-index:2}
 
 /* ---------- 1. the sentence you write by scrolling ---------- */
 #hello{height:520vh;position:relative}
+#hello .stick::before{content:"";position:absolute;left:50%;top:50%;width:min(1300px,130vw);height:80%;transform:translate(-50%,-50%);background:radial-gradient(ellipse at center,rgba(40,18,52,.5),rgba(40,18,52,0) 70%);pointer-events:none}
 #hello .stick{position:sticky;top:0;height:100vh;height:100svh;display:flex;align-items:center;justify-content:center;padding:86px calc(var(--gutR) + 30px) 80px calc(var(--gut) + 64px)}
-.sentence{display:inline-block;max-width:1100px;text-align:center;font-weight:400;font-variation-settings:"wdth" 92;font-size:var(--hs,clamp(16px,2vw,30px));line-height:1.95;letter-spacing:-.012em;text-shadow:0 1px 18px rgba(6,10,18,.9)}
+.sentence{position:relative;text-shadow:0 1px 14px rgba(30,10,40,.85),0 0 2px rgba(30,10,40,.5);display:inline-block;max-width:1100px;text-align:center;font-weight:400;font-variation-settings:"wdth" 92;font-size:var(--hs,clamp(16px,2vw,30px));line-height:1.95;letter-spacing:-.012em;text-shadow:0 1px 18px rgba(6,10,18,.9)}
 .sentence .t{display:none}
 .sentence .t.on{display:inline}
 .sentence .t.fresh{animation:wordIn .55s cubic-bezier(.2,.7,.2,1) backwards}
@@ -1077,7 +1079,7 @@ function buildWorld(canvas){
   var scene=new T.Scene();
   var NIGHT={top:new T.Color('#02040c'),mid:new T.Color('#0b1838'),hor:new T.Color('#1f4256'),fog:new T.Color('#0a1626'),moon:new T.Color('#fff4dc'),glow:1};
   var DAWN={top:new T.Color('#1b2a5c'),mid:new T.Color('#5a4a86'),hor:new T.Color('#f29a6e'),fog:new T.Color('#43405e'),moon:new T.Color('#ffe9c9'),glow:.75};
-  var SUNSET={top:new T.Color('#2c2459'),mid:new T.Color('#b4567e'),hor:new T.Color('#ffa36e'),fog:new T.Color('#74465f')};
+  var SUNSET={top:new T.Color('#8c9fdc'),mid:new T.Color('#e3b4e0'),hor:new T.Color('#ffd2a8'),fog:new T.Color('#6b5478')};
   var PAL={top:NIGHT.top.clone(),mid:NIGHT.mid.clone(),hor:NIGHT.hor.clone(),fog:NIGHT.fog.clone(),glow:1};
   scene.fog=new T.FogExp2(PAL.fog.clone(),.0105);
   var camera=new T.PerspectiveCamera(MOBILE?62:52,vw/vh,.1,1800);
@@ -1088,7 +1090,7 @@ function buildWorld(canvas){
   // --- sky dome
   var skyMat=new T.ShaderMaterial({side:T.BackSide,depthWrite:false,fog:false,uniforms:{top:{value:PAL.top},mid:{value:PAL.mid},hor:{value:PAL.hor},time:U.time,sunDir:{value:new T.Vector3(.34,.05,-1).normalize()},sunAmt:{value:1}},
     vertexShader:'varying vec3 vD;void main(){vD=normalize(position);gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.);gl_Position.z=gl_Position.w;}',
-    fragmentShader:'uniform vec3 top,mid,hor,sunDir;uniform float time,sunAmt;varying vec3 vD;'+NOISE+'void main(){float y=vD.y;vec3 c=mix(hor,mid,smoothstep(-.05,.22,y));c=mix(c,top,smoothstep(.2,.75,y));float band=exp(-pow((vD.x*.6+vD.y-.55)*3.,2.))*smoothstep(.0,.3,y);c+=vec3(.06,.08,.14)*band*vn(vD.xz*9.+vD.y*4.);c+=hor*.25*exp(-abs(y)*14.);float sd=max(dot(vD,sunDir),0.);c+=vec3(1.,.55,.35)*pow(sd,7.)*.6*sunAmt+vec3(1.,.72,.45)*pow(sd,60.)*.6*sunAmt+vec3(1.,.9,.7)*smoothstep(.9986,.9992,sd)*1.4*sunAmt;gl_FragColor=vec4(c,1.);}'});
+    fragmentShader:'uniform vec3 top,mid,hor,sunDir;uniform float time,sunAmt;varying vec3 vD;'+NOISE+'void main(){float y=vD.y;vec3 c=mix(hor,mid,smoothstep(-.05,.22,y));c=mix(c,top,smoothstep(.2,.75,y));float band=exp(-pow((vD.x*.6+vD.y-.55)*3.,2.))*smoothstep(.0,.3,y);c+=vec3(.06,.08,.14)*band*vn(vD.xz*9.+vD.y*4.);c+=hor*.25*exp(-abs(y)*14.);vec3 P=mix(vec3(1.,.79,.6),vec3(.98,.63,.7),smoothstep(-.02,.08,y));P=mix(P,vec3(.8,.58,.84),smoothstep(.06,.2,y));P=mix(P,vec3(.55,.52,.84),smoothstep(.18,.4,y));P=mix(P,vec3(.33,.38,.7),smoothstep(.38,.8,y));float cl=smoothstep(.52,.86,vn(vec2(vD.x*4./(y+.25)+time*.008,y*22.)))*smoothstep(.02,.1,y)*smoothstep(.45,.2,y);P=mix(P,mix(vec3(1.,.91,.8),vec3(.99,.78,.88),smoothstep(.05,.3,y)),cl*.6);P=mix(P,vec3(.84,.62,.8),smoothstep(.02,-.12,y));c=mix(c,P,sunAmt);float sd=max(dot(vD,sunDir),0.);c+=vec3(1.,.72,.55)*pow(sd,7.)*.35*sunAmt+vec3(1.,.82,.6)*pow(sd,60.)*.5*sunAmt+vec3(1.,.9,.7)*smoothstep(.9986,.9992,sd)*1.4*sunAmt;gl_FragColor=vec4(c,1.);}'});
   var sky=new T.Mesh(new T.SphereGeometry(1000,48,24),skyMat);sky.renderOrder=-1;scene.add(sky);
 
   // --- stars
@@ -1217,7 +1219,7 @@ function buildWorld(canvas){
   var lookCurve=new T.CatmullRomCurve3([new T.Vector3(10,74,-200),new T.Vector3(8,62,-200),P(-30,0,6),P(-30,0,2),P(-60,0,2.2),P(-100,0,2.6),P(-140,0,3),P(-180,0,3.4),P(-220,0,6),P(-262,0,14),P(-268,0,17)],false,'catmullrom',.4);
 
   var mouse={x:0,y:0,sx:0,sy:0},curT=0,tgtT=0,dawn=0,dawnT=0,sunK=1;
-  var HEMI_N=new T.Color(0x46679a),HEMI_S=new T.Color(0xe39aa8),MOON_N=new T.Color(0xb9ccff),MOON_S=new T.Color(0xffb38a);
+  var HEMI_N=new T.Color(0x46679a),HEMI_S=new T.Color(0xd9a9c8),MOON_N=new T.Color(0xb9ccff),MOON_S=new T.Color(0xffb38a);
   addEventListener('pointermove',function(e){mouse.x=e.clientX/vw*2-1;mouse.y=e.clientY/vh*2-1},{passive:true});
   var tv=new T.Vector3(),lv=new T.Vector3(),fwd=new T.Vector3();
   var clock=new T.Clock();
@@ -1417,7 +1419,7 @@ function update(t,dt){
   // lantern-release hint
   var showRel=GL&&docP>.86;release.classList.toggle('show',showRel&&!released);$('#sndLbl').style.opacity=docP<.03?1:0;
   // camera: hero portion stays in the sky, then the descent and river journey
-  SUNK=1-sstep(vh*.25,SEC.hello.top+SEC.hello.h*.8,y);
+  SUNK=1-sstep(SEC.hello.top+SEC.hello.h*.55,SEC.snaps.top+SEC.snaps.h*.35,y);
   var heroEnd=SEC.hello.top+SEC.hello.h-vh;var camT=y<heroEnd?(y/heroEnd)*.06:.06+.94*clamp((y-heroEnd)/(maxY-heroEnd),0,1);
   return camT;
 }
