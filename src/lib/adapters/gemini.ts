@@ -120,7 +120,7 @@ async function callGemini(batch: ExplainInput[]): Promise<Explanation[]> {
   }));
   const config = {
     systemInstruction: SYSTEM,
-    temperature: 0.2,
+    temperature: 0, // the "looks unusual" routing should not change between runs on the same data,
     // Gemini 3 "thinking" counts against the output budget; keep it low and leave plenty of room.
     maxOutputTokens: 8192,
     responseMimeType: "application/json",

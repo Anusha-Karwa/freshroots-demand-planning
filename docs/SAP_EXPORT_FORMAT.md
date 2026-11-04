@@ -52,3 +52,18 @@ SKUs without a stock figure (they go to the exceptions queue).
 
 - Sales: billing documents (VBRK/VBRP) summed by ISO week, material and sold-to party.
 - Stock: MB52 / MARD unrestricted stock by material (all storage locations).
+
+## File size and the first history load
+
+Vercel accepts uploads of up to **4.5 MB** per request. At Freshroots' size (400 SKUs, 1,200 distributors, about
+40 SKUs per distributor) one week of distributor-level sales is about **1.2 MB**, so the twice-weekly upload of the
+latest week fits comfortably. A longer history does not: 16 weeks is about 19 MB, three years about 190 MB.
+
+Load the history once from a computer instead, straight into the production database:
+
+```bash
+DATABASE_URL="<Neon pooled URL>" DATABASE_URL_UNPOOLED="<Neon direct URL>" npm run seed -- --skus sku_master.csv --distributors distributors.csv --sales sales_history.csv --inventory stock.csv
+```
+
+Tested at that size on the local database: 768,000 sales rows load in about 40 s, and a forecast run over 400 SKUs
+takes about 3 s before Gemini (about 32 Gemini calls of 12 SKUs, 3 at a time, well inside the 5-minute cron limit).
