@@ -71,6 +71,9 @@ Environment Variables**, then redeploy. Check them on the **Integrations** page 
 5. Cron jobs come from `vercel.json`: forecast `30 0 * * 1,4` (Mon + Thu 06:00 IST) and tracker `30 1 * * *`
    (daily 07:00 IST). Vercel sends `CRON_SECRET` automatically. On the Hobby plan each cron runs once a day at most,
    within the scheduled hour, which both jobs fit.
+6. `vercel.json` also pins the server functions to `sin1` (Singapore), next to the Neon database in
+   `ap-southeast-1`. If you create the Neon database in another region, change `regions` to the matching Vercel
+   region: every page makes several database round trips, so a cross-ocean hop adds about a second per page.
 
 ## Switching from seed data to a real SAP export
 
