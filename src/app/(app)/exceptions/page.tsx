@@ -1,11 +1,19 @@
 import { getSession } from "@/lib/auth";
-import { dateLabel, num, pct } from "@/lib/format";
+import { dateLabel, num } from "@/lib/format";
 import { pageDb, param, type SearchParams } from "@/lib/page";
-import { queueItems } from "@/lib/queries";
+import { queueItems, type QueueRow } from "@/lib/queries";
 import { EXCEPTION_LABEL, FLAG_LABEL, type ExceptionCode, type Flag } from "@/lib/rules/engine";
 import { Badge, Empty, Flash, PageHeader, TextLink } from "@/components/ui";
 import { DecisionForm, DecisionStatus } from "@/components/DecisionForm";
-import { CoverCell, ExpectedCell, TrendCell } from "@/components/Numbers";
+import { CoverBar, Headline, KeyNumbers, NumbersDetail, Reason, SkuCard, coverWhy, metricRows, standardNumbers } from "@/components/SkuCard";
+
+function rulesWouldSay(row: QueueRow) {
+  const { item } = row;
+  const q = item.metrics.ruleSuggestedQty;
+  const flags = (item.flags as Flag[]).map((f) => FLAG_LABEL[f].toLowerCase()).join(", ");
+  if (q == null) return flags ? `Rules flag ${flags} but can’t size an order` : "The rules have no suggestion";
+  return q === 0 ? `Rules alone would pause the next order${flags ? ` (${flags})` : ""}` : `Rules alone would order ${num(q)}${flags ? ` (${flags})` : ""}`;
+}
 
 export default async function ExceptionsPage({ searchParams }: { searchParams: SearchParams }) {
   const sp = await searchParams;
@@ -13,62 +21,47 @@ export default async function ExceptionsPage({ searchParams }: { searchParams: S
   const db = await pageDb();
   const { run, items } = await queueItems(db, "exception");
   const planner = session.role === "planner";
+  const pending = items.filter((r) => r.item.decision === "pending");
+  const decided = items.filter((r) => r.item.decision !== "pending");
+
+  const card = (row: QueueRow) => {
+    const { item } = row;
+    const m = item.metrics;
+    return (
+      <SkuCard key={item.id} row={row} aside={<><DecisionStatus row={row} />{planner && <DecisionForm row={row} back="/exceptions" exception />}</>}>
+        <div className="flex flex-wrap gap-1.5">
+          {(item.exceptions as ExceptionCode[]).map((e) => <Badge key={e} tone={e === "AI_UNUSUAL" ? "info" : "warn"}>{EXCEPTION_LABEL[e]}</Badge>)}
+        </div>
+        <Headline title={rulesWouldSay(row)} why={coverWhy(m)} tone="mute" />
+        <CoverBar m={m} />
+        <KeyNumbers items={standardNumbers(m)} />
+        <Reason note={item.aiNote} text={item.reason} source={item.reasonSource} />
+        <NumbersDetail rows={metricRows(m)} />
+      </SkuCard>
+    );
+  };
 
   return (
     <>
       <PageHeader
         title="Exceptions"
-        subtitle={<>Cases the rules can’t decide — new SKUs, big week-on-week swings, one distributor driving the change, rules that disagree, or a case Gemini thinks looks unusual. These are the 15–20% Raghav handles on judgement: there is no rule quantity, you set it. {run && <>Run #{run.id}, sales through {dateLabel(run.dataThrough)}.</>}</>}
+        subtitle={<>Cases the rules can’t settle on their own: new SKUs, sudden swings, one distributor driving demand, or something Gemini finds unusual. You set the quantity.{run && <> Run #{run.id} · sales through {dateLabel(run.dataThrough)}.</>}</>}
       />
       <Flash msg={param(sp.msg)} err={param(sp.err)} />
       {!run ? <Empty>No forecast run yet. Run one from the <TextLink href="/">Overview</TextLink>.</Empty> : items.length === 0 ? (
-        <Empty>No exceptions in run #{run.id}. Every flagged SKU was covered by the rules.</Empty>
+        <Empty>No exceptions in run #{run.id}. The rules covered every flagged SKU.</Empty>
       ) : (
-        <div className="overflow-x-auto rounded-lg border border-[var(--border)] bg-[var(--surface)]">
-          <table className="data">
-            <thead>
-              <tr>
-                <th>SKU</th><th>Why it’s here</th><th>Last week vs before</th><th className="r">Stock</th><th>Weeks of cover</th><th>4-wk vs 12-wk</th>
-                <th className="r">Expected</th><th>Rules alone would say</th><th>Note (Gemini)</th><th>Your call</th>
-              </tr>
-            </thead>
-            <tbody>
-              {items.map((row) => {
-                const { item, sku } = row;
-                const m = item.metrics;
-                return (
-                  <tr key={item.id}>
-                    <td className="min-w-40">
-                          <span id={`row-${item.id}`} className="block scroll-mt-16" />
-                      <div className="font-medium">{sku.id}</div>
-                      <div className="text-xs text-[var(--text-2)]">{sku.name}</div>
-                      {m.perishable && <Badge tone="warn">Perishable</Badge>}
-                    </td>
-                    <td><div className="flex flex-col gap-1">{(item.exceptions as ExceptionCode[]).map((e) => <Badge key={e} tone={e === "AI_UNUSUAL" ? "info" : "warn"}>{EXCEPTION_LABEL[e]}</Badge>)}</div></td>
-                    <td className="num">
-                      {num(m.lastWeek)} vs {num(m.prevWeek)}
-                      <div className="text-xs text-[var(--text-3)]">{m.wowPct == null ? (m.prevWeek === 0 && (m.lastWeek ?? 0) > 0 ? "from zero" : "—") : pct(m.wowPct)} · {m.weeksOfHistory} wks history</div>
-                      {m.topDistributor && <div className="text-xs text-[var(--text-3)]">{m.topDistributor.id}: {Math.round(m.topDistributor.sharePct)}% of change</div>}
-                    </td>
-                    <td className="r num">{num(m.stock)}</td>
-                    <td><CoverCell m={m} /></td>
-                    <td><TrendCell m={m} /></td>
-                    <td className="r"><ExpectedCell m={m} /></td>
-                    <td className="text-xs">
-                      {item.flags.length ? (item.flags as Flag[]).map((f) => FLAG_LABEL[f]).join(", ") : "No flag"}
-                      {m.ruleSuggestedQty != null && <div className="num">qty {num(m.ruleSuggestedQty)}</div>}
-                    </td>
-                    <td className="min-w-48 max-w-[15rem] text-xs">
-                      {item.aiNote && <div className="mb-1 font-medium">{item.aiNote}</div>}
-                      {item.reason}
-                      <div className="mt-1"><Badge tone={item.reasonSource === "gemini" ? "info" : "mute"}>{item.reasonSource === "gemini" ? "Gemini" : "Template"}</Badge></div>
-                    </td>
-                    <td><DecisionStatus row={row} />{planner && <DecisionForm row={row} back="/exceptions" exception />}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+        <div className="space-y-6">
+          <section className="space-y-3">
+            <h2 className="text-sm font-semibold uppercase tracking-wide text-[var(--text-3)]">Waiting for you · {pending.length}</h2>
+            {pending.length === 0 ? <Empty>All exceptions in this run are decided.</Empty> : pending.map(card)}
+          </section>
+          {decided.length > 0 && (
+            <details className="space-y-3" open={pending.length === 0}>
+              <summary className="cursor-pointer text-sm font-semibold uppercase tracking-wide text-[var(--text-3)]">Decided · {decided.length}</summary>
+              <div className="mt-3 space-y-3">{decided.map(card)}</div>
+            </details>
+          )}
         </div>
       )}
     </>

@@ -18,7 +18,7 @@ export function Nav({ items }: { items: NavItem[] }) {
             // Every page reads the database; prefetching all nine on each load slows cold starts on Vercel.
             prefetch={false}
             aria-current={active ? "page" : undefined}
-            className={`flex items-center justify-between gap-2 whitespace-nowrap rounded-md px-3 py-1.5 ${
+            className={`flex items-center justify-between gap-2 whitespace-nowrap rounded-lg px-3 py-2 ${
               active ? "bg-[var(--surface-2)] font-semibold" : "text-[var(--text-2)] hover:bg-[var(--surface-2)]"
             }`}
           >

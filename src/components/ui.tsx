@@ -4,10 +4,10 @@ import type { Light } from "@/lib/killswitch";
 
 export function PageHeader({ title, subtitle, actions }: { title: string; subtitle?: ReactNode; actions?: ReactNode }) {
   return (
-    <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
+    <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
       <div>
-        <h1 className="text-xl font-semibold">{title}</h1>
-        {subtitle && <p className="mt-1 max-w-3xl text-[var(--text-2)]">{subtitle}</p>}
+        <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
+        {subtitle && <p className="mt-1.5 max-w-2xl text-[var(--text-2)]">{subtitle}</p>}
       </div>
       {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
     </div>
@@ -16,9 +16,9 @@ export function PageHeader({ title, subtitle, actions }: { title: string; subtit
 
 export function Card({ title, children, className = "", right }: { title?: ReactNode; children: ReactNode; className?: string; right?: ReactNode }) {
   return (
-    <section className={`rounded-lg border border-[var(--border)] bg-[var(--surface)] p-4 ${className}`}>
+    <section className={`rounded-xl border border-[var(--border)] bg-[var(--surface)] p-5 ${className}`}>
       {(title || right) && (
-        <div className="mb-3 flex items-center justify-between gap-2">
+        <div className="mb-4 flex items-center justify-between gap-2">
           {title && <h2 className="font-semibold">{title}</h2>}
           {right}
         </div>
@@ -31,10 +31,10 @@ export function Card({ title, children, className = "", right }: { title?: React
 export function Stat({ label, value, sub, tone }: { label: string; value: ReactNode; sub?: ReactNode; tone?: "good" | "warn" | "bad" }) {
   const color = tone === "good" ? "text-[var(--good)]" : tone === "warn" ? "text-[var(--warn)]" : tone === "bad" ? "text-[var(--bad)]" : "";
   return (
-    <div className="rounded-lg border border-[var(--border)] bg-[var(--surface)] p-4">
-      <div className="text-xs font-medium uppercase tracking-wide text-[var(--text-3)]">{label}</div>
-      <div className={`num mt-1 text-2xl font-semibold ${color}`}>{value}</div>
-      {sub && <div className="mt-1 text-xs text-[var(--text-2)]">{sub}</div>}
+    <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-5">
+      <div className="text-sm text-[var(--text-3)]">{label}</div>
+      <div className={`num mt-1 text-2xl font-semibold tracking-tight ${color}`}>{value}</div>
+      {sub && <div className="mt-1 text-sm text-[var(--text-2)]">{sub}</div>}
     </div>
   );
 }
@@ -49,7 +49,7 @@ const TONES = {
 export type Tone = keyof typeof TONES;
 
 export function Badge({ tone = "mute", children, title }: { tone?: Tone; children: ReactNode; title?: string }) {
-  return <span title={title} className={`inline-block whitespace-nowrap rounded px-1.5 py-0.5 text-xs font-medium ${TONES[tone]}`}>{children}</span>;
+  return <span title={title} className={`inline-block whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ${TONES[tone]}`}>{children}</span>;
 }
 
 const LIGHT: Record<Light, { tone: Tone; icon: string; label: string }> = {
@@ -76,7 +76,7 @@ export function Flash({ msg, err }: { msg?: string; err?: string }) {
 }
 
 export function Empty({ children }: { children: ReactNode }) {
-  return <div className="rounded-md border border-dashed border-[var(--border)] p-6 text-center text-[var(--text-2)]">{children}</div>;
+  return <div className="rounded-xl border border-dashed border-[var(--border)] p-8 text-center text-[var(--text-2)]">{children}</div>;
 }
 
 export function Button({ children, variant = "primary", ...props }: React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: "primary" | "secondary" | "danger" }) {
@@ -85,7 +85,7 @@ export function Button({ children, variant = "primary", ...props }: React.Button
     : variant === "danger"
       ? "bg-[var(--surface)] text-[var(--bad)] border-[var(--border)] hover:bg-[var(--bad-bg)]"
       : "bg-[var(--surface)] text-[var(--text)] border-[var(--border)] hover:bg-[var(--surface-2)]";
-  return <button {...props} className={`rounded-md border px-3 py-1.5 text-sm font-medium disabled:opacity-50 ${v} ${props.className ?? ""}`}>{children}</button>;
+  return <button {...props} className={`rounded-lg border px-4 py-2 text-sm font-medium disabled:opacity-50 ${v} ${props.className ?? ""}`}>{children}</button>;
 }
 
 export function TextLink({ href, children }: { href: string; children: ReactNode }) {

@@ -19,7 +19,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
 
   return (
     <div className="mx-auto flex min-h-screen max-w-[1600px] flex-col md:flex-row">
-      <aside className="border-b border-[var(--border)] p-4 md:sticky md:top-0 md:h-screen md:w-56 md:shrink-0 md:border-b-0 md:border-r">
+      <aside className="border-b border-[var(--border)] p-4 md:sticky md:top-0 md:h-screen md:w-60 md:shrink-0 md:bg-[var(--surface)] md:border-b-0 md:border-r">
         <div className="mb-4">
           <div className="font-semibold">Freshroots</div>
           <div className="text-xs text-[var(--text-3)]">Demand planning</div>
@@ -43,7 +43,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           )}
         </div>
       </aside>
-      <main className="min-w-0 flex-1 p-4 md:p-6">{children}</main>
+      <main className="min-w-0 flex-1 p-4 md:px-10 md:py-8"><div className="mx-auto max-w-6xl">{children}</div></main>
     </div>
   );
 }
