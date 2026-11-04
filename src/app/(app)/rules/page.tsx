@@ -99,8 +99,8 @@ export default async function RulesPage({ searchParams }: { searchParams: Search
               <div className="space-y-2">
                 {s.fields.map((f) => (
                   <label key={f.key} className="flex items-center gap-2">
-                    <span className="w-56 text-[var(--text-2)]">{f.label}</span>
-                    <input name={f.key} type="number" step={f.step ?? "1"} min={0} defaultValue={cfg[f.key]} className="num w-24" />
+                    <span className="min-w-0 flex-1 text-[var(--text-2)] sm:w-56 sm:flex-none">{f.label}</span>
+                    <input name={f.key} type="number" step={f.step ?? "1"} min={0} defaultValue={cfg[f.key]} className="num w-24 shrink-0" />
                     <span className="text-xs text-[var(--text-3)]">{f.unit}{cfg[f.key] !== DEFAULT_RULES[f.key] && ` (default ${DEFAULT_RULES[f.key]})`}</span>
                   </label>
                 ))}
@@ -113,8 +113,8 @@ export default async function RulesPage({ searchParams }: { searchParams: Search
               {skus.map((s) => {
                 const o = cfg.perishableOverrides[s.id];
                 return (
-                  <label key={s.id} className="flex items-center justify-between gap-2">
-                    <span className="truncate">{s.id} <span className="text-xs text-[var(--text-2)]">{s.name}</span></span>
+                  <label key={s.id} className="flex min-w-0 items-center justify-between gap-2">
+                    <span className="min-w-0 truncate">{s.id} <span className="text-xs text-[var(--text-2)]">{s.name}</span></span>
                     <select name={`perishable:${s.id}`} defaultValue={o === undefined ? "file" : o ? "yes" : "no"} className="text-xs">
                       <option value="file">File: {s.perishable ? "perishable" : "not perishable"}</option>
                       <option value="yes">Perishable</option>
@@ -173,8 +173,8 @@ export default async function RulesPage({ searchParams }: { searchParams: Search
                 ["trackerVariancePct", "Tracker: flag actual vs forecast beyond", "± %", baseline.trackerVariancePct],
               ] as const).map(([key, label, unit, value]) => (
                 <label key={key} className="flex items-center gap-2">
-                  <span className="w-60 text-[var(--text-2)]">{label}</span>
-                  <input name={key} type="number" step="any" min={0} defaultValue={value} className="num w-24" />
+                  <span className="min-w-0 flex-1 text-[var(--text-2)] sm:w-60 sm:flex-none">{label}</span>
+                  <input name={key} type="number" step="any" min={0} defaultValue={value} className="num w-24 shrink-0" />
                   <span className="text-xs text-[var(--text-3)]">{unit}</span>
                 </label>
               ))}

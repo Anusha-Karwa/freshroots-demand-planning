@@ -16,7 +16,8 @@ export function PageHeader({ title, subtitle, actions }: { title: string; subtit
 
 export function Card({ title, children, className = "", right }: { title?: ReactNode; children: ReactNode; className?: string; right?: ReactNode }) {
   return (
-    <section className={`rounded-xl border border-[var(--border)] bg-[var(--surface)] p-5 ${className}`}>
+    // min-w-0: inside a grid, a card must not grow to fit its widest table or input row (phones scrolled sideways).
+    <section className={`min-w-0 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-5 ${className}`}>
       {(title || right) && (
         <div className="mb-4 flex items-center justify-between gap-2">
           {title && <h2 className="font-semibold">{title}</h2>}
@@ -31,7 +32,7 @@ export function Card({ title, children, className = "", right }: { title?: React
 export function Stat({ label, value, sub, tone }: { label: string; value: ReactNode; sub?: ReactNode; tone?: "good" | "warn" | "bad" }) {
   const color = tone === "good" ? "text-[var(--good)]" : tone === "warn" ? "text-[var(--warn)]" : tone === "bad" ? "text-[var(--bad)]" : "";
   return (
-    <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-5">
+    <div className="min-w-0 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-5">
       <div className="text-sm text-[var(--text-3)]">{label}</div>
       <div className={`num mt-1 text-2xl font-semibold tracking-tight ${color}`}>{value}</div>
       {sub && <div className="mt-1 text-sm text-[var(--text-2)]">{sub}</div>}
