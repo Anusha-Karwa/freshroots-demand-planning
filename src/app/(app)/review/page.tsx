@@ -1,15 +1,41 @@
 import { getSession } from "@/lib/auth";
 import { dateLabel, num } from "@/lib/format";
 import { pageDb, param, type SearchParams } from "@/lib/page";
-import { queueItems } from "@/lib/queries";
+import { queueItems, type QueueRow } from "@/lib/queries";
 import { FLAG_LABEL, type Flag } from "@/lib/rules/engine";
-import { actionLabel } from "@/lib/rules/reason";
-import { Badge, Card, Empty, Flash, PageHeader, TextLink } from "@/components/ui";
+import { Empty, Flash, PageHeader, TextLink } from "@/components/ui";
 import { DecisionForm, DecisionStatus } from "@/components/DecisionForm";
-import { CoverCell, ExpectedCell, TrendCell } from "@/components/Numbers";
+import { CoverBar, Headline, KeyNumbers, NumbersDetail, Reason, SkuCard, coverWhy, metricRows, standardNumbers } from "@/components/SkuCard";
 import { bulkApproveAction } from "../../actions";
 
-const FLAG_TONE: Record<Flag, "bad" | "info" | "warn"> = { STOCKOUT_RISK: "bad", HIGH_DEMAND: "info", OVERSTOCK_RISK: "warn" };
+function headline(row: QueueRow) {
+  const { item } = row;
+  const m = item.metrics;
+  const flags = item.flags as Flag[];
+  const qty = item.recommendedQty ?? 0;
+  if (item.action === "pause" || qty === 0) return { title: "Pause the next order", tone: "warn" as const };
+  const tone = flags.includes("STOCKOUT_RISK") ? ("bad" as const) : ("info" as const);
+  const extra = flags.includes("HIGH_DEMAND") && m.changePct != null ? ` · demand up ${Math.round(m.changePct)}%` : "";
+  return { title: `Order ${num(qty)}${extra}`, tone };
+}
+
+function ReviewCard({ row, planner, back }: { row: QueueRow; planner: boolean; back: string }) {
+  const { item } = row;
+  const m = item.metrics;
+  const h = headline(row);
+  return (
+    <SkuCard
+      row={row}
+      aside={<><DecisionStatus row={row} />{planner && <DecisionForm row={row} back={back} />}</>}
+    >
+      <Headline title={h.title} why={coverWhy(m)} tone={h.tone} />
+      <CoverBar m={m} />
+      <KeyNumbers items={standardNumbers(m)} />
+      <Reason text={item.reason} source={item.reasonSource} />
+      <NumbersDetail rows={metricRows(m)} />
+    </SkuCard>
+  );
+}
 
 export default async function ReviewPage({ searchParams }: { searchParams: SearchParams }) {
   const sp = await searchParams;
@@ -17,20 +43,21 @@ export default async function ReviewPage({ searchParams }: { searchParams: Searc
   const db = await pageDb();
   const { run, items } = await queueItems(db, "review");
   const filter = param(sp.flag) as Flag | undefined;
-  const status = param(sp.status) ?? "all";
-  const shown = items
-    .filter((r) => !filter || r.item.flags.includes(filter))
-    .filter((r) => status === "all" || (status === "pending" ? r.item.decision === "pending" : r.item.decision !== "pending"));
-  const bulk = items.filter((r) => r.item.flags.includes("STOCKOUT_RISK") && r.item.decision === "pending" && !r.item.poId);
   const planner = session.role === "planner";
-  const pending = items.filter((r) => r.item.decision === "pending").length;
-  const back = `/review${filter || status !== "all" ? `?${new URLSearchParams({ ...(filter ? { flag: filter } : {}), ...(status !== "all" ? { status } : {}) })}` : ""}`;
+  const inFilter = items.filter((r) => !filter || r.item.flags.includes(filter));
+  const pending = inFilter.filter((r) => r.item.decision === "pending");
+  const decided = inFilter.filter((r) => r.item.decision !== "pending");
+  const bulk = items.filter((r) => r.item.flags.includes("STOCKOUT_RISK") && r.item.decision === "pending" && !r.item.poId);
+  const back = `/review${filter ? `?flag=${filter}` : ""}`;
 
-  const link = (label: string, f?: string, s?: string) => {
-    const qs = new URLSearchParams({ ...(f ? { flag: f } : {}), ...(s && s !== "all" ? { status: s } : {}) }).toString();
-    const active = (f ?? undefined) === filter && (s ?? "all") === status;
+  const tab = (label: string, f?: Flag) => {
+    const n = items.filter((r) => !f || r.item.flags.includes(f)).length;
+    const active = f === filter;
     return (
-      <a key={label} href={`/review${qs ? `?${qs}` : ""}`} className={`rounded-md px-2.5 py-1 text-xs ${active ? "bg-[var(--surface-2)] font-semibold" : "text-[var(--text-2)] hover:bg-[var(--surface-2)]"}`}>{label}</a>
+      <a key={label} href={`/review${f ? `?flag=${f}` : ""}`} aria-current={active ? "page" : undefined}
+        className={`rounded-full px-3.5 py-1.5 text-sm ${active ? "bg-[var(--text)] text-[var(--bg)]" : "bg-[var(--surface)] text-[var(--text-2)] ring-1 ring-[var(--border)] hover:bg-[var(--surface-2)]"}`}>
+        {label} <span className="num opacity-70">{n}</span>
+      </a>
     );
   };
 
@@ -38,91 +65,58 @@ export default async function ReviewPage({ searchParams }: { searchParams: Searc
     <>
       <PageHeader
         title="Review queue"
-        subtitle={<>Your final call. The rules computed every quantity; Gemini only explains. Approve, edit the quantity, or reject — edits and rejections need a reason. {run && <>Run #{run.id}, sales through {dateLabel(run.dataThrough)}.</>}</>}
+        subtitle={run
+          ? <>Run #{run.id} · sales through {dateLabel(run.dataThrough)}. Quantities come from the rules; you make the final call.</>
+          : "Quantities come from the rules; you make the final call."}
       />
       <Flash msg={param(sp.msg)} err={param(sp.err)} />
 
       {!run ? <Empty>No forecast run yet. Run one from the <TextLink href="/">Overview</TextLink>.</Empty> : (
-        <>
-          {planner && bulk.length > 0 && (
-            <Card title={`Bulk approve stockout risk (${bulk.length})`} className="mb-4">
-              <form action={bulkApproveAction}>
-                <p className="mb-2 text-xs text-[var(--text-2)]">Check each line’s numbers below before approving. Untick any line you want to handle one by one.</p>
-                <table className="data mb-3">
-                  <thead><tr><th></th><th>SKU</th><th className="r">Stock</th><th>Cover</th><th className="r">Expected</th><th className="r">Rule qty</th></tr></thead>
-                  <tbody>
-                    {bulk.map(({ item, sku }) => (
-                      <tr key={item.id}>
-                        <td><input type="checkbox" name="itemId" value={item.id} defaultChecked aria-label={`Include ${sku.id}`} /></td>
-                        <td>{sku.id} · {sku.name}</td>
-                        <td className="r num">{num(item.metrics.stock)}</td>
-                        <td><CoverCell m={item.metrics} /></td>
-                        <td className="r"><ExpectedCell m={item.metrics} /></td>
-                        <td className="r num font-semibold">{num(item.recommendedQty)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-                <label className="mr-3 inline-flex items-center gap-2"><input type="checkbox" name="reviewed" required /> I have reviewed these lines</label>
-                <button className="rounded-md bg-[var(--accent)] px-3 py-1.5 text-sm font-medium text-[var(--accent-ink)]">Approve selected</button>
-              </form>
-            </Card>
+        <div className="space-y-6">
+          {planner && bulk.length > 1 && (
+            <form action={bulkApproveAction} className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-5">
+              <h2 className="font-semibold">Approve all stockout reorders at once</h2>
+              <p className="mt-0.5 text-sm text-[var(--text-2)]">Untick any you want to look at one by one below.</p>
+              <ul className="mt-3 divide-y divide-[var(--border)]">
+                {bulk.map(({ item, sku }) => (
+                  <li key={item.id}>
+                    <label className="flex cursor-pointer items-center gap-3 py-2">
+                      <input type="checkbox" name="itemId" value={item.id} defaultChecked aria-label={`Include ${sku.id}`} className="size-4" />
+                      <span className="flex-1">{sku.name}</span>
+                      <span className="num hidden text-sm text-[var(--text-3)] sm:inline">{item.metrics.weeksCover} wk left</span>
+                      <span className="num w-24 text-right font-semibold">Order {num(item.recommendedQty)}</span>
+                    </label>
+                  </li>
+                ))}
+              </ul>
+              <div className="mt-3 flex flex-wrap items-center gap-4">
+                <label className="inline-flex items-center gap-2 text-sm"><input type="checkbox" name="reviewed" required className="size-4" /> I have checked these lines</label>
+                <button className="rounded-lg bg-[var(--accent)] px-4 py-2 text-sm font-medium text-[var(--accent-ink)] hover:opacity-90">Approve selected</button>
+              </div>
+            </form>
           )}
 
-          <div className="mb-3 flex flex-wrap items-center gap-1">
-            {link(`All (${items.length})`, undefined, status)}
-            {(Object.keys(FLAG_LABEL) as Flag[]).map((f) => link(`${FLAG_LABEL[f]} (${items.filter((r) => r.item.flags.includes(f)).length})`, f, status))}
-            <span className="mx-2 text-[var(--border)]">|</span>
-            {link(`Pending (${pending})`, filter, "pending")}
-            {link("Decided", filter, "decided")}
-            {link("Any status", filter, "all")}
-          </div>
+          <nav className="flex flex-wrap gap-2" aria-label="Filter by flag">
+            {tab("All")}
+            {(Object.keys(FLAG_LABEL) as Flag[]).map((f) => tab(FLAG_LABEL[f], f))}
+          </nav>
 
-          {shown.length === 0 ? <Empty>Nothing here.</Empty> : (
-            <div className="overflow-x-auto rounded-lg border border-[var(--border)] bg-[var(--surface)]">
-              <table className="data">
-                <thead>
-                  <tr>
-                    <th>SKU</th><th>Flag</th><th className="r">Stock · expected</th><th>Weeks of cover</th><th>4-wk vs 12-wk</th>
-                    <th className="r">Recommended</th><th>Why (reason)</th><th>Your call</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {shown.map((row) => {
-                    const { item, sku } = row;
-                    const m = item.metrics;
-                    return (
-                      <tr key={item.id}>
-                        <td className="min-w-36">
-                          <span id={`row-${item.id}`} className="block scroll-mt-16" />
-                          <div className="font-medium">{sku.id}</div>
-                          <div className="text-xs text-[var(--text-2)]">{sku.name}</div>
-                          <div className="mt-0.5 flex gap-1 text-xs text-[var(--text-3)]">{sku.category}{m.perishable && <Badge tone="warn">Perishable</Badge>}</div>
-                        </td>
-                        <td><div className="flex flex-col gap-1">{(item.flags as Flag[]).map((f) => <Badge key={f} tone={FLAG_TONE[f]}>{FLAG_LABEL[f]}</Badge>)}</div></td>
-                        <td className="r num">
-                          <div>{num(m.stock)}</div>
-                          <div className="text-xs text-[var(--text-3)]"><ExpectedCell m={m} /></div>
-                        </td>
-                        <td><CoverCell m={m} /></td>
-                        <td><TrendCell m={m} /></td>
-                        <td className="r num">
-                          <div className="font-semibold">{num(item.recommendedQty)}</div>
-                          <div className="text-xs text-[var(--text-3)]">{actionLabel(item.action)} · std {num(sku.standardOrderQty)}</div>
-                        </td>
-                        <td className="min-w-44 max-w-[13rem] text-xs">
-                          {item.reason}
-                          <div className="mt-1"><Badge tone={item.reasonSource === "gemini" ? "info" : "mute"}>{item.reasonSource === "gemini" ? "Gemini" : "Template"}</Badge></div>
-                        </td>
-                        <td><DecisionStatus row={row} />{planner && <DecisionForm row={row} back={back} />}</td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
+          <section className="space-y-3">
+            <h2 className="text-sm font-semibold uppercase tracking-wide text-[var(--text-3)]">Waiting for you · {pending.length}</h2>
+            {pending.length === 0
+              ? <Empty>Nothing waiting here. {decided.length > 0 && "Everything below is decided."}</Empty>
+              : pending.map((row) => <ReviewCard key={row.item.id} row={row} planner={planner} back={back} />)}
+          </section>
+
+          {decided.length > 0 && (
+            <details className="group space-y-3" open={pending.length === 0}>
+              <summary className="cursor-pointer text-sm font-semibold uppercase tracking-wide text-[var(--text-3)]">Decided · {decided.length}</summary>
+              <div className="mt-3 space-y-3">
+                {decided.map((row) => <ReviewCard key={row.item.id} row={row} planner={planner} back={back} />)}
+              </div>
+            </details>
           )}
-        </>
+        </div>
       )}
     </>
   );
