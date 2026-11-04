@@ -137,3 +137,21 @@ export function metricRows(m: ItemMetrics): [string, ReactNode][] {
     ...(m.topDistributor ? [["Biggest distributor in the change", `${m.topDistributor.id} (${Math.round(m.topDistributor.sharePct)}%)`] as [string, ReactNode]] : []),
   ];
 }
+
+/**
+ * Raghav's rules order a fixed quantity (standard, or 1.5× for high demand), which does not always land inside
+ * the window: show where stock ends up so a short or oversized order is visible before approval.
+ */
+export function AfterOrder({ m, qty }: { m: ItemMetrics; qty: number | null }) {
+  if (!qty || m.stock == null || m.expectedWeekly <= 0) return null;
+  const exact = (m.stock + qty) / m.expectedWeekly;
+  const short = exact < m.minCoverWeeks; // compare before rounding: 5.95 weeks is still short of 6
+  const over = exact > m.maxCoverWeeks;
+  const weeks = short ? Math.floor(exact * 10) / 10 : over ? Math.ceil(exact * 10) / 10 : Math.round(exact * 10) / 10;
+  return (
+    <p className={`text-sm ${short || over ? "font-medium text-[var(--warn)]" : "text-[var(--text-2)]"}`}>
+      {short || over ? "⚠ " : ""}After this order: about {weeks} weeks of stock
+      {short ? ` — still below the ${m.minCoverWeeks}-week minimum.` : over ? ` — above the ${m.maxCoverWeeks}-week maximum${m.perishable ? " for a perishable" : ""}.` : `, inside the target.`}
+    </p>
+  );
+}

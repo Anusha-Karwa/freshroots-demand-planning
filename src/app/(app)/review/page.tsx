@@ -5,7 +5,7 @@ import { queueItems, type QueueRow } from "@/lib/queries";
 import { FLAG_LABEL, type Flag } from "@/lib/rules/engine";
 import { Empty, Flash, PageHeader, TextLink } from "@/components/ui";
 import { DecisionForm, DecisionStatus } from "@/components/DecisionForm";
-import { CoverBar, Headline, KeyNumbers, NumbersDetail, Reason, SkuCard, coverWhy, metricRows, standardNumbers } from "@/components/SkuCard";
+import { AfterOrder, CoverBar, Headline, KeyNumbers, NumbersDetail, Reason, SkuCard, coverWhy, metricRows, standardNumbers } from "@/components/SkuCard";
 import { bulkApproveAction } from "../../actions";
 
 function headline(row: QueueRow) {
@@ -30,6 +30,7 @@ function ReviewCard({ row, planner, back }: { row: QueueRow; planner: boolean; b
     >
       <Headline title={h.title} why={coverWhy(m)} tone={h.tone} />
       <CoverBar m={m} />
+      <AfterOrder m={m} qty={item.finalQty ?? item.recommendedQty} />
       <KeyNumbers items={standardNumbers(m)} />
       <Reason text={item.reason} source={item.reasonSource} />
       <NumbersDetail rows={metricRows(m)} />
