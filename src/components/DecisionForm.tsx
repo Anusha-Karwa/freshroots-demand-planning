@@ -19,10 +19,10 @@ export function DecisionStatus({ row }: { row: QueueRow }) {
   );
 }
 
-const btn = "w-full rounded-lg px-3 py-2 text-sm font-medium whitespace-nowrap";
-const primary = `${btn} bg-[var(--accent)] text-[var(--accent-ink)] hover:opacity-90`;
-const secondary = `${btn} border border-[var(--border)] bg-[var(--surface)] hover:bg-[var(--surface-2)]`;
-const danger = `${btn} border border-[var(--border)] bg-[var(--surface)] text-[var(--bad)] hover:bg-[var(--bad-bg)]`;
+const btn = "w-full rounded-full px-4 py-2.5 text-sm font-bold whitespace-nowrap transition";
+const primary = `${btn} bg-[var(--green)] text-[var(--ink)] hover:brightness-95 hover:scale-[1.02]`;
+const secondary = `${btn} bg-[var(--ink)] text-white hover:opacity-90`;
+const danger = `${btn} border border-[rgb(23_30_25/0.2)] bg-[var(--surface)] text-[var(--bad)] hover:bg-[var(--bad-bg)]`;
 
 function Hidden({ row, back }: { row: QueueRow; back: string }) {
   return (

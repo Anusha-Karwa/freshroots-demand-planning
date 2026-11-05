@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import type { QueueRow } from "@/lib/queries";
 import { FLAG_LABEL, type Flag, type ItemMetrics } from "@/lib/rules/engine";
 import { num, pct } from "@/lib/format";
+import { describeDecision, direction, type PastDecision } from "@/lib/feedback";
 import { Badge } from "./ui";
 
 export const FLAG_TONE: Record<Flag, "bad" | "info" | "warn"> = { STOCKOUT_RISK: "bad", HIGH_DEMAND: "info", OVERSTOCK_RISK: "warn" };
@@ -10,19 +11,19 @@ export const FLAG_TONE: Record<Flag, "bad" | "info" | "warn"> = { STOCKOUT_RISK:
 export function SkuCard({ row, aside, children }: { row: QueueRow; aside?: ReactNode; children: ReactNode }) {
   const { item, sku } = row;
   return (
-    <article className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-5">
+    <article className="lift rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-6">
       <span id={`row-${item.id}`} className="block scroll-mt-20" />
-      <div className="flex flex-col gap-5 lg:flex-row lg:items-start">
-        <div className="min-w-0 flex-1 space-y-4">
+      <div className="flex flex-col gap-6 lg:flex-row lg:items-start">
+        <div className="min-w-0 flex-1 space-y-5">
           <header className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
-            <h2 className="text-base font-semibold">{sku.name}</h2>
+            <h2 className="text-lg font-bold">{sku.name}</h2>
             <span className="text-sm text-[var(--text-3)]">{sku.id} · {sku.category}</span>
             {item.metrics.perishable && <Badge tone="warn">Perishable</Badge>}
             {(item.flags as Flag[]).map((f) => <Badge key={f} tone={FLAG_TONE[f]}>{FLAG_LABEL[f]}</Badge>)}
           </header>
           {children}
         </div>
-        {aside && <div className="lg:w-72 lg:shrink-0 lg:border-l lg:border-[var(--border)] lg:pl-5">{aside}</div>}
+        {aside && <div className="lg:w-72 lg:shrink-0 lg:border-l lg:border-[var(--border)] lg:pl-6">{aside}</div>}
       </div>
     </article>
   );
@@ -33,8 +34,8 @@ export function Headline({ title, why, tone }: { title: ReactNode; why: ReactNod
   const color = tone === "bad" ? "text-[var(--bad)]" : tone === "warn" ? "text-[var(--warn)]" : tone === "info" ? "text-[var(--series-1)]" : "";
   return (
     <div>
-      <div className={`num text-xl font-semibold ${color}`}>{title}</div>
-      <p className="mt-0.5 text-[var(--text-2)]">{why}</p>
+      <div className={`display num text-4xl ${color}`}>{title}</div>
+      <p className="mt-2 text-[var(--text-2)]">{why}</p>
     </div>
   );
 }
@@ -80,8 +81,8 @@ export function KeyNumbers({ items }: { items: { label: string; value: ReactNode
     <dl className="grid max-w-xl grid-cols-3 gap-4">
       {items.map((i) => (
         <div key={i.label}>
-          <dt className="text-xs text-[var(--text-3)]">{i.label}</dt>
-          <dd className="num text-base font-medium">{i.value}</dd>
+          <dt className="text-[11px] font-bold uppercase tracking-widest text-[var(--text-3)]">{i.label}</dt>
+          <dd className="display num mt-1 text-2xl">{i.value}</dd>
           {i.hint && <dd className="text-xs text-[var(--text-3)]">{i.hint}</dd>}
         </div>
       ))}
@@ -101,7 +102,7 @@ export function standardNumbers(m: ItemMetrics) {
 export function Reason({ text, source, note }: { text: string | null; source: string | null; note?: string | null }) {
   if (!text && !note) return null;
   return (
-    <div className="max-w-2xl rounded-lg bg-[var(--surface-2)] px-4 py-3 text-sm leading-relaxed">
+    <div className="max-w-2xl rounded-xl border-l-4 border-[var(--green)] bg-[var(--surface-2)] px-4 py-3 text-sm leading-relaxed">
       {note && <p className="mb-1.5 font-medium">{note}</p>}
       {text && <p className="text-[var(--text-2)]">{text}</p>}
       <div className="mt-1.5 text-xs text-[var(--text-3)]">{source === "gemini" ? "Explained by Gemini" : "Explained by template"}</div>
@@ -153,5 +154,24 @@ export function AfterOrder({ m, qty }: { m: ItemMetrics; qty: number | null }) {
       {short || over ? "⚠ " : ""}After this order: about {weeks} weeks of stock
       {short ? ` — still below the ${m.minCoverWeeks}-week minimum.` : over ? ` — above the ${m.maxCoverWeeks}-week maximum${m.perishable ? " for a perishable" : ""}.` : `, inside the target.`}
     </p>
+  );
+}
+
+/**
+ * Feedback loop on the card: what Raghav decided on this SKU last time, so a repeated override is visible
+ * and he can decide consistently (or change the rule at the source).
+ */
+export function LastTime({ d }: { d: PastDecision | undefined }) {
+  if (!d) return null;
+  const dir = direction(d);
+  const tone = dir === "kept" ? "text-[var(--text-2)]" : "text-[var(--text)]";
+  return (
+    <div className={`flex max-w-2xl items-start gap-3 rounded-xl border border-dashed border-[var(--border)] px-4 py-2.5 text-sm ${tone}`}>
+      <span aria-hidden className="display mt-0.5 grid size-6 shrink-0 place-items-center rounded-full bg-[var(--ink)] text-xs text-[var(--green)]">↺</span>
+      <span>
+        <span className="font-bold">Last time (run #{d.runId}):</span> {describeDecision(d)}
+        <span className="text-[var(--text-3)]"> · {d.decidedBy}</span>
+      </span>
+    </div>
   );
 }

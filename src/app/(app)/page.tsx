@@ -6,6 +6,7 @@ import { daysBetween, todayIst } from "@/lib/dates";
 import { latestRun } from "@/lib/forecast/run";
 import { latestSalesWeek } from "@/lib/forecast/inputs";
 import { dateLabel, dateTimeLabel, inr, num } from "@/lib/format";
+import { overridePatterns } from "@/lib/feedback";
 import { computeKillSwitch } from "@/lib/killswitch";
 import { pageDb, param, type SearchParams } from "@/lib/page";
 import { baselineMonthly, getBaseline } from "@/lib/settings";
@@ -18,11 +19,12 @@ export default async function Overview({ searchParams }: { searchParams: SearchP
   const sp = await searchParams;
   const session = await getSession();
   const db = await pageDb();
-  const [run, baseline, ks, lastWeek, runs, losses, decisions] = await Promise.all([
+  const [run, baseline, ks, lastWeek, runs, losses, decisions, feedback] = await Promise.all([
     latestRun(db), getBaseline(db), computeKillSwitch(db), latestSalesWeek(db),
     db.select().from(schema.runs).orderBy(desc(schema.runs.id)).limit(6),
     db.select().from(schema.monthlyLosses).orderBy(schema.monthlyLosses.yearMonth),
     db.select({ age: schema.decisionLog.dataAgeDays }).from(schema.decisionLog).orderBy(desc(schema.decisionLog.id)).limit(50),
+    overridePatterns(db),
   ]);
   const today = todayIst();
   const monthly = baselineMonthly(baseline);
@@ -56,12 +58,13 @@ export default async function Overview({ searchParams }: { searchParams: SearchP
       )}
 
       {run && (
-        <section className="mb-6 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-5">
+        <section className="relative isolate mb-8 overflow-hidden rounded-2xl bg-[var(--ink)] p-6 text-white md:p-8">
+          <div aria-hidden className="display pointer-events-none absolute -right-4 -bottom-6 select-none text-[9rem] leading-none text-white/[0.04]">Mon · Thu</div>
           {pendingReview + pendingExceptions > 0 ? (
-            <div className="flex flex-wrap items-center gap-x-8 gap-y-4">
+            <div className="relative z-10 flex flex-wrap items-center gap-x-8 gap-y-4">
               <div className="min-w-0 flex-1">
-                <h2 className="text-lg font-semibold">{pendingReview + pendingExceptions} decision{pendingReview + pendingExceptions === 1 ? "" : "s"} waiting for you</h2>
-                <p className="text-[var(--text-2)]">From run #{run.id} ({dateTimeLabel(run.finishedAt)}). Nothing is ordered until you approve it.</p>
+                <h2 className="display text-4xl md:text-5xl">{pendingReview + pendingExceptions} decision{pendingReview + pendingExceptions === 1 ? "" : "s"} <span className="hl">waiting</span></h2>
+                <p className="mt-3 text-[var(--sage)]">From run #{run.id} ({dateTimeLabel(run.finishedAt)}). Nothing is ordered until you approve it.</p>
               </div>
               <div className="flex flex-wrap gap-2">
                 {pendingReview > 0 && <ActionLink href="/review" primary>{pendingReview} to review</ActionLink>}
@@ -69,10 +72,10 @@ export default async function Overview({ searchParams }: { searchParams: SearchP
               </div>
             </div>
           ) : (
-            <div className="flex flex-wrap items-center gap-x-8 gap-y-3">
+            <div className="relative z-10 flex flex-wrap items-center gap-x-8 gap-y-3">
               <div className="flex-1">
-                <h2 className="text-lg font-semibold">All caught up</h2>
-                <p className="text-[var(--text-2)]">Every line in run #{run.id} is decided. Approved lines become draft POs on the Purchase orders page.</p>
+                <h2 className="display text-4xl md:text-5xl">All caught <span className="hl">up</span></h2>
+                <p className="mt-3 text-[var(--sage)]">Every line in run #{run.id} is decided. Approved lines become draft POs on the Purchase orders page.</p>
               </div>
               <ActionLink href="/purchase-orders">Purchase orders</ActionLink>
             </div>
@@ -80,7 +83,14 @@ export default async function Overview({ searchParams }: { searchParams: SearchP
         </section>
       )}
 
-      <div className="mb-6 grid gap-4 sm:grid-cols-3">
+      {feedback.patterns.length > 0 && (
+        <div className="mb-8 flex flex-wrap items-center justify-between gap-3 rounded-2xl border-2 border-[var(--ink)] p-5">
+          <p><span className="font-bold">Feedback loop:</span> you keep overriding {feedback.patterns.length} SKU{feedback.patterns.length === 1 ? "" : "s"} the same way. Fixing the rule at the source saves you correcting it every run.</p>
+          <ActionLink href="/tracker">See which</ActionLink>
+        </div>
+      )}
+
+      <div className="mb-8 grid gap-4 sm:grid-cols-3">
         <Stat label="Last run" value={run ? dateTimeLabel(run.finishedAt) : "—"} sub={run ? `Next: Mon & Thu, 6:00 am` : "Runs Mon & Thu, 6:00 am"} />
         <Stat
           label="Data freshness"
@@ -95,7 +105,7 @@ export default async function Overview({ searchParams }: { searchParams: SearchP
         />
       </div>
 
-      <div className="mb-6 grid items-start gap-4 lg:grid-cols-3">
+      <div className="mb-8 grid items-start gap-4 lg:grid-cols-3">
         <Card title="₹ losses vs baseline" className="lg:col-span-2">
           {losses.length ? (
             <LossChart
@@ -124,8 +134,8 @@ export default async function Overview({ searchParams }: { searchParams: SearchP
         </div>
       </div>
 
-      <details className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-5">
-        <summary className="cursor-pointer font-semibold">Before vs now, and recent runs</summary>
+      <details className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-6">
+        <summary className="display cursor-pointer text-2xl">Before vs now, and recent runs</summary>
         <div className="mt-4 grid gap-6 lg:grid-cols-2">
           <table className="data">
             <thead><tr><th>Measure</th><th>Before</th><th>Now</th></tr></thead>
@@ -161,8 +171,8 @@ export default async function Overview({ searchParams }: { searchParams: SearchP
 function ActionLink({ href, primary, children }: { href: string; primary?: boolean; children: React.ReactNode }) {
   return (
     <Link href={href} prefetch={false}
-      className={`rounded-lg px-4 py-2 text-sm font-medium ${primary ? "bg-[var(--accent)] text-[var(--accent-ink)] hover:opacity-90" : "border border-[var(--border)] hover:bg-[var(--surface-2)]"}`}>
-      {children} →
+      className={`inline-flex items-center gap-2 rounded-full px-6 py-3 text-sm font-bold transition-transform hover:scale-105 ${primary ? "bg-[var(--green)] text-[var(--ink)]" : "border border-current"}`}>
+      {children} <span aria-hidden>→</span>
     </Link>
   );
 }

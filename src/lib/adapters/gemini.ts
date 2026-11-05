@@ -17,7 +17,7 @@ export interface ExplainInput {
   exceptions: string[];
   metrics: Record<string, unknown>;
   template: string; // the rule-based reason: the facts Gemini must stay within
-  context: string[]; // festival / competitor scheme notes for the period
+  context: string[]; // festival / competitor scheme notes for the period, and the planner's last decision on the SKU
 }
 
 export interface Explanation {
@@ -35,6 +35,9 @@ A rules engine has already flagged each SKU and computed every number. For each 
 - "unusual": true only if the facts suggest the rules may be wrong for this SKU (for example the flag contradicts the
   recent trend, demand is erratic, the festival uplift alone creates the flag, or a competitor scheme may explain the change).
 - "note": one sentence saying why it looks unusual, or "" when it doesn't.
+- marketContext may include the planner's last decision on this SKU and his reason. If he overrode the rule last time
+  and his reason still seems to apply, say so in one short clause and set "unusual" to true so he decides it again.
+  If he simply approved, ignore it.
 Return one entry per input item, with the same skuId.`;
 
 const replySchema = z.object({

@@ -62,4 +62,15 @@ describe("pipeline on the supplied seed data", () => {
     expect(b.points).toBeGreaterThan(50);
     expect(b.weeksReplayed).toHaveLength(4);
   });
+
+  it("feeds Raghav's last decision back into the next run", async () => {
+    const { lastDecisions, overridePatterns } = await import("@/lib/feedback");
+    const next = await runForecast(db, { trigger: "script", planningDate: "2026-10-24" });
+    const past = await lastDecisions(db, ["SKU001", "SKU006", "SKU002"], next.runId);
+    expect(past.get("SKU001")).toMatchObject({ decision: "approved", finalQty: 750 });
+    expect(past.get("SKU006")).toMatchObject({ decision: "rejected", reason: "new listing" });
+    expect(past.has("SKU002")).toBe(false); // never flagged, never decided
+    expect((await lastDecisions(db, ["SKU001"], 1)).size).toBe(0); // nothing before the first run
+    expect((await overridePatterns(db)).patterns).toEqual([]); // one rejection is not a pattern
+  });
 });

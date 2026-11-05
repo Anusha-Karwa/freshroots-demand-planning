@@ -5,7 +5,8 @@ import { queueItems, type QueueRow } from "@/lib/queries";
 import { FLAG_LABEL, type Flag } from "@/lib/rules/engine";
 import { Empty, Flash, PageHeader, TextLink } from "@/components/ui";
 import { DecisionForm, DecisionStatus } from "@/components/DecisionForm";
-import { AfterOrder, CoverBar, Headline, KeyNumbers, NumbersDetail, Reason, SkuCard, coverWhy, metricRows, standardNumbers } from "@/components/SkuCard";
+import { AfterOrder, CoverBar, Headline, LastTime, KeyNumbers, NumbersDetail, Reason, SkuCard, coverWhy, metricRows, standardNumbers } from "@/components/SkuCard";
+import { lastDecisions, type PastDecision } from "@/lib/feedback";
 import { bulkApproveAction } from "../../actions";
 
 function headline(row: QueueRow) {
@@ -19,7 +20,7 @@ function headline(row: QueueRow) {
   return { title: `Order ${num(qty)}${extra}`, tone };
 }
 
-function ReviewCard({ row, planner, back }: { row: QueueRow; planner: boolean; back: string }) {
+function ReviewCard({ row, planner, back, last }: { row: QueueRow; planner: boolean; back: string; last?: PastDecision }) {
   const { item } = row;
   const m = item.metrics;
   const h = headline(row);
@@ -31,6 +32,7 @@ function ReviewCard({ row, planner, back }: { row: QueueRow; planner: boolean; b
       <Headline title={h.title} why={coverWhy(m)} tone={h.tone} />
       <CoverBar m={m} />
       <AfterOrder m={m} qty={item.finalQty ?? item.recommendedQty} />
+      <LastTime d={last} />
       <KeyNumbers items={standardNumbers(m)} />
       <Reason text={item.reason} source={item.reasonSource} />
       <NumbersDetail rows={metricRows(m)} />
@@ -43,6 +45,7 @@ export default async function ReviewPage({ searchParams }: { searchParams: Searc
   const session = await getSession();
   const db = await pageDb();
   const { run, items } = await queueItems(db, "review");
+  const past = run ? await lastDecisions(db, items.map((r) => r.sku.id), run.id) : new Map<string, PastDecision>();
   const filter = param(sp.flag) as Flag | undefined;
   const planner = session.role === "planner";
   const inFilter = items.filter((r) => !filter || r.item.flags.includes(filter));
@@ -56,7 +59,7 @@ export default async function ReviewPage({ searchParams }: { searchParams: Searc
     const active = f === filter;
     return (
       <a key={label} href={`/review${f ? `?flag=${f}` : ""}`} aria-current={active ? "page" : undefined}
-        className={`rounded-full px-3.5 py-1.5 text-sm ${active ? "bg-[var(--text)] text-[var(--bg)]" : "bg-[var(--surface)] text-[var(--text-2)] ring-1 ring-[var(--border)] hover:bg-[var(--surface-2)]"}`}>
+        className={`rounded-full px-4 py-2 text-sm font-bold ${active ? "bg-[var(--ink)] text-[var(--green)]" : "bg-[var(--surface)] text-[var(--text-2)] ring-1 ring-[var(--border)] hover:bg-[var(--surface-2)]"}`}>
         {label} <span className="num opacity-70">{n}</span>
       </a>
     );
@@ -75,8 +78,8 @@ export default async function ReviewPage({ searchParams }: { searchParams: Searc
       {!run ? <Empty>No forecast run yet. Run one from the <TextLink href="/">Overview</TextLink>.</Empty> : (
         <div className="space-y-6">
           {planner && bulk.length > 1 && (
-            <form action={bulkApproveAction} className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-5">
-              <h2 className="font-semibold">Approve all stockout reorders at once</h2>
+            <form action={bulkApproveAction} className="rounded-2xl border-2 border-[var(--ink)] bg-[var(--surface)] p-6">
+              <h2 className="display text-3xl">Approve all stockout reorders at <span className="hl">once</span></h2>
               <p className="mt-0.5 text-sm text-[var(--text-2)]">Untick any you want to look at one by one below.</p>
               <ul className="mt-3 divide-y divide-[var(--border)]">
                 {bulk.map(({ item, sku }) => (
@@ -92,7 +95,7 @@ export default async function ReviewPage({ searchParams }: { searchParams: Searc
               </ul>
               <div className="mt-3 flex flex-wrap items-center gap-4">
                 <label className="inline-flex items-center gap-2 text-sm"><input type="checkbox" name="reviewed" required className="size-4" /> I have checked these lines</label>
-                <button className="rounded-lg bg-[var(--accent)] px-4 py-2 text-sm font-medium text-[var(--accent-ink)] hover:opacity-90">Approve selected</button>
+                <button className="rounded-full bg-[var(--green)] px-6 py-2.5 text-sm font-bold text-[var(--ink)] transition hover:scale-105">Approve selected</button>
               </div>
             </form>
           )}
@@ -103,17 +106,17 @@ export default async function ReviewPage({ searchParams }: { searchParams: Searc
           </nav>
 
           <section className="space-y-3">
-            <h2 className="text-sm font-semibold uppercase tracking-wide text-[var(--text-3)]">Waiting for you · {pending.length}</h2>
+            <h2 className="display text-2xl">Waiting for you <span className="text-[var(--text-3)]">· {pending.length}</span></h2>
             {pending.length === 0
               ? <Empty>Nothing waiting here. {decided.length > 0 && "Everything below is decided."}</Empty>
-              : pending.map((row) => <ReviewCard key={row.item.id} row={row} planner={planner} back={back} />)}
+              : pending.map((row) => <ReviewCard key={row.item.id} row={row} planner={planner} back={back} last={past.get(row.sku.id)} />)}
           </section>
 
           {decided.length > 0 && (
             <details className="group space-y-3" open={pending.length === 0}>
-              <summary className="cursor-pointer text-sm font-semibold uppercase tracking-wide text-[var(--text-3)]">Decided · {decided.length}</summary>
+              <summary className="display cursor-pointer text-2xl text-[var(--text-3)]">Decided · {decided.length}</summary>
               <div className="mt-3 space-y-3">
-                {decided.map((row) => <ReviewCard key={row.item.id} row={row} planner={planner} back={back} />)}
+                {decided.map((row) => <ReviewCard key={row.item.id} row={row} planner={planner} back={back} last={past.get(row.sku.id)} />)}
               </div>
             </details>
           )}
