@@ -3,6 +3,7 @@ import { schema } from "@/db";
 import { getSession } from "@/lib/auth";
 import { addDays, todayIst } from "@/lib/dates";
 import { dateLabel, dateTimeLabel, inr, monthLabel, num, pct } from "@/lib/format";
+import { overridePatterns, patternAdvice } from "@/lib/feedback";
 import { overridesByRun } from "@/lib/killswitch";
 import { pageDb, param, type SearchParams } from "@/lib/page";
 import { getBaseline } from "@/lib/settings";
@@ -29,14 +30,16 @@ export default async function TrackerPage({ searchParams }: { searchParams: Sear
       .innerJoin(schema.skus, eq(schema.skus.id, schema.trackerChecks.skuId))
       .where(eq(schema.trackerChecks.checkDate, lastCheck.d)).orderBy(schema.trackerChecks.skuId)
     : [];
-  const [incidents, overrides, runOverrides, losses, pos, skus] = await Promise.all([
+  const [incidents, overrides, runOverrides, losses, pos, skus, feedback] = await Promise.all([
     db.select().from(schema.stockoutIncidents).orderBy(desc(schema.stockoutIncidents.weekStart)).limit(100),
     db.select().from(schema.decisionLog).where(inArray(schema.decisionLog.decision, ["edited", "rejected"])).orderBy(desc(schema.decisionLog.id)).limit(30),
     overridesByRun(db),
     db.select().from(schema.monthlyLosses).orderBy(desc(schema.monthlyLosses.yearMonth)),
     db.select({ age: schema.purchaseOrders.dataAgeDays }).from(schema.purchaseOrders),
     db.select({ id: schema.skus.id, name: schema.skus.name }).from(schema.skus).orderBy(schema.skus.id),
+    overridePatterns(db),
   ]);
+  const skuName = new Map(skus.map((s) => [s.id, s.name]));
 
   const off = checks.filter((c) => c.c.status !== "on_track").length;
   const byStatus = (s: string) => checks.filter((c) => c.c.status === s).length;
@@ -56,14 +59,40 @@ export default async function TrackerPage({ searchParams }: { searchParams: Sear
       />
       <Flash msg={param(sp.msg)} err={param(sp.err)} />
 
-      <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
+      <div className="mb-6 grid grid-cols-2 gap-4 lg:grid-cols-4">
         <Stat label="Off forecast" value={`${off} of ${checks.length}`} sub={lastCheck?.d ? `Check of ${dateLabel(lastCheck.d)}` : "No check yet"} tone={off ? "warn" : checks.length ? "good" : undefined} />
         <Stat label="Out of stock now" value={byStatus("stockout")} tone={byStatus("stockout") ? "bad" : undefined} sub={`${incidents.length} stockout incident(s) logged`} />
         <Stat label="Override rate" value={totalDecided ? pct((totalOverridden / totalDecided) * 100, false) : "—"} sub={`${totalOverridden} edited/rejected of ${totalDecided} decided`} />
         <Stat label="Data age at PO" value={poAges.length ? `${(poAges.reduce((a, b) => a + b, 0) / poAges.length).toFixed(1)} days` : "—"} sub={`Target ≤ ${baseline.dataAgeTargetDays} days (was 3–4 weeks)`} tone={poAges.length ? (Math.max(...poAges) <= baseline.dataAgeTargetDays ? "good" : "warn") : undefined} />
       </div>
 
-      <Card title="Early warning: actual vs forecast" className="mb-4">
+      <Card title="Feedback: repeated overrides" className="mb-6"
+        right={<span className="text-sm text-[var(--text-3)]">Last {feedback.runIds.length || "—"} run{feedback.runIds.length === 1 ? "" : "s"} with decisions</span>}>
+        <p className="mb-4 max-w-3xl text-sm text-[var(--text-2)]">
+          When Raghav keeps correcting the same SKU the same way, the rule or the master data is wrong for it. Fix it at the
+          source so the next run gets it right. His last decision also goes back to Gemini and onto each card.
+        </p>
+        {feedback.patterns.length === 0 ? (
+          <Empty>No repeated overrides. A SKU shows up here after at least 2 edits or rejections in the same direction, making up half or more of its decisions.</Empty>
+        ) : (
+          <ul className="grid gap-3 md:grid-cols-2">
+            {feedback.patterns.map((p) => (
+              <li key={p.skuId} className="lift rounded-xl border border-[var(--border)] p-4">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="font-bold">{skuName.get(p.skuId) ?? p.skuId}</span>
+                  <Badge tone={p.direction === "rejected" ? "bad" : "warn"}>
+                    {p.direction === "down" ? "Cut" : p.direction === "up" ? "Raised" : "Rejected"} {p.count} of {p.decided}
+                  </Badge>
+                </div>
+                <p className="mt-1 text-sm text-[var(--text-3)]">{p.skuId} · runs {p.runs.map((r) => `#${r}`).join(", ")}{p.lastReason ? ` · latest reason “${p.lastReason}”` : ""}</p>
+                <p className="mt-2 text-sm">{patternAdvice(p)}</p>
+              </li>
+            ))}
+          </ul>
+        )}
+      </Card>
+
+      <Card title="Early warning: actual vs forecast" className="mb-6">
         {checks.length === 0 ? <Empty>The daily check runs at 07:00 IST.{planner && " Or run it now (top right)."}</Empty> : (
           <div className="overflow-x-auto">
             <p className="mb-2 text-xs text-[var(--text-2)]">Week of {dateLabel(checks[0].c.weekStart)} — SAP sales arrive weekly, so these move when a new week is loaded.</p>

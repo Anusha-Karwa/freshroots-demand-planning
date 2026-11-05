@@ -5,7 +5,8 @@ import { queueItems, type QueueRow } from "@/lib/queries";
 import { EXCEPTION_LABEL, FLAG_LABEL, type ExceptionCode, type Flag } from "@/lib/rules/engine";
 import { Badge, Empty, Flash, PageHeader, TextLink } from "@/components/ui";
 import { DecisionForm, DecisionStatus } from "@/components/DecisionForm";
-import { CoverBar, Headline, KeyNumbers, NumbersDetail, Reason, SkuCard, coverWhy, metricRows, standardNumbers } from "@/components/SkuCard";
+import { lastDecisions, type PastDecision } from "@/lib/feedback";
+import { CoverBar, Headline, LastTime, KeyNumbers, NumbersDetail, Reason, SkuCard, coverWhy, metricRows, standardNumbers } from "@/components/SkuCard";
 
 function rulesWouldSay(row: QueueRow) {
   const { item } = row;
@@ -20,6 +21,7 @@ export default async function ExceptionsPage({ searchParams }: { searchParams: S
   const session = await getSession();
   const db = await pageDb();
   const { run, items } = await queueItems(db, "exception");
+  const past = run ? await lastDecisions(db, items.map((r) => r.sku.id), run.id) : new Map<string, PastDecision>();
   const planner = session.role === "planner";
   const pending = items.filter((r) => r.item.decision === "pending");
   const decided = items.filter((r) => r.item.decision !== "pending");
@@ -36,6 +38,7 @@ export default async function ExceptionsPage({ searchParams }: { searchParams: S
         <CoverBar m={m} />
         <KeyNumbers items={standardNumbers(m)} />
         <Reason note={item.aiNote} text={item.reason} source={item.reasonSource} />
+        <LastTime d={past.get(row.sku.id)} />
         <NumbersDetail rows={metricRows(m)} />
       </SkuCard>
     );
@@ -53,12 +56,12 @@ export default async function ExceptionsPage({ searchParams }: { searchParams: S
       ) : (
         <div className="space-y-6">
           <section className="space-y-3">
-            <h2 className="text-sm font-semibold uppercase tracking-wide text-[var(--text-3)]">Waiting for you · {pending.length}</h2>
+            <h2 className="display text-2xl">Waiting for you <span className="text-[var(--text-3)]">· {pending.length}</span></h2>
             {pending.length === 0 ? <Empty>All exceptions in this run are decided.</Empty> : pending.map(card)}
           </section>
           {decided.length > 0 && (
             <details className="space-y-3" open={pending.length === 0}>
-              <summary className="cursor-pointer text-sm font-semibold uppercase tracking-wide text-[var(--text-3)]">Decided · {decided.length}</summary>
+              <summary className="display cursor-pointer text-2xl text-[var(--text-3)]">Decided · {decided.length}</summary>
               <div className="mt-3 space-y-3">{decided.map(card)}</div>
             </details>
           )}

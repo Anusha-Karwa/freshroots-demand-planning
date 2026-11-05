@@ -3,6 +3,7 @@ import { schema, type Db } from "@/db";
 import { addDays, todayIst } from "@/lib/dates";
 import { explainFlags, type ExplainInput } from "@/lib/adapters/gemini";
 import { evaluateSku, type Evaluation } from "@/lib/rules/engine";
+import { feedbackContext, lastDecisions } from "@/lib/feedback";
 import { templateReason } from "@/lib/rules/reason";
 import { getRules } from "@/lib/settings";
 import { loadEngineData, type SkuInfo } from "./inputs";
@@ -37,11 +38,14 @@ export async function runForecast(db: Db, opts: { trigger: "cron" | "manual" | "
     const flagged = evaluations.filter((e) => e.queue !== "none");
 
     const context = await marketContext(db, planningDate);
+    // Feedback loop: Raghav's last decision on each flagged SKU goes back in as context for Gemini.
+    const past = await lastDecisions(db, flagged.map((e) => e.skuId), run.id);
     const explainInputs: ExplainInput[] = flagged.map((e) => {
       const sku = data.skus.get(e.skuId)!;
+      const last = past.get(e.skuId);
       return {
         skuId: e.skuId, name: sku.name, category: sku.category, flags: e.flags, exceptions: e.exceptions,
-        metrics: geminiFacts(e), template: templateReason(e), context: context(sku),
+        metrics: geminiFacts(e), template: templateReason(e), context: [...context(sku), ...(last ? [feedbackContext(last)] : [])],
       };
     });
     const explained = await explainFlags(explainInputs);

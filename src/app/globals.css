@@ -1,86 +1,129 @@
 @import "tailwindcss";
 
-/* Design tokens. Pages use these through Tailwind's arbitrary values, e.g. bg-[var(--surface)]. */
+/*
+ * Design system: brutalist-lite, high contrast. Anton for display (uppercase, tight), Satoshi for body.
+ * Charcoal / white / sage with a mint-green accent for primary actions and highlights.
+ * Pages use the tokens through Tailwind's arbitrary values, e.g. bg-[var(--surface)].
+ */
+@theme {
+  --font-display: "Anton", "Impact", "Arial Narrow", sans-serif;
+  --font-sans: "Satoshi", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
 :root {
   color-scheme: light;
-  --bg: #f6f6f4;
-  --surface: #fcfcfb;
-  --surface-2: #f0efec;
-  --border: #e2e1dc;
-  --text: #0b0b0b;
-  --text-2: #52514e;
-  --text-3: #75746f;
-  --accent: #1f6f43;
-  --accent-ink: #ffffff;
-  --series-1: #2a78d6;
-  --series-2: #eb6834;
-  --good: #16794a;
-  --good-bg: #e3f3ea;
-  --warn: #8a5a00;
-  --warn-bg: #fdf1d6;
-  --bad: #b42318;
-  --bad-bg: #fde7e5;
-  --info-bg: #e8f0fb;
-  --mute-bg: #ecebe7;
+  --ink: #171e19;
+  --ink-2: #272727;
+  --sage: #b7c6c2;
+  --green: #8ff0a4;
+  --bg: #ffffff;
+  --surface: #ffffff;
+  --surface-2: #f6f8f7;
+  --border: rgb(23 30 25 / 0.1);
+  --text: #171e19;
+  --text-2: rgb(23 30 25 / 0.72);
+  --text-3: rgb(23 30 25 / 0.55);
+  --accent: #8ff0a4;
+  --accent-ink: #171e19;
+  --series-1: #1f7a4d;
+  --series-2: #d9603b;
+  --good: #15803d;
+  --good-bg: #dcfce7;
+  --warn: #9a5b00;
+  --warn-bg: #fff1d6;
+  --bad: #c0261a;
+  --bad-bg: #ffe5e2;
+  --info-bg: #e6f2ee;
+  --mute-bg: #eef1f0;
+  --grid-line: rgb(183 198 194 / 0.28);
 }
 @media (prefers-color-scheme: dark) {
   :root:where(:not([data-theme="light"])) {
     color-scheme: dark;
-    --bg: #111110;
-    --surface: #1a1a19;
-    --surface-2: #232321;
-    --border: #34332f;
-    --text: #f0efec;
-    --text-2: #c3c2b7;
-    --text-3: #9b9a92;
-    --accent: #3fae73;
-    --accent-ink: #0b0b0b;
-    --series-1: #3987e5;
-    --series-2: #d95926;
-    --good: #5fd39a;
-    --good-bg: #16301f;
-    --warn: #f0b84a;
-    --warn-bg: #352a10;
-    --bad: #ff8a80;
-    --bad-bg: #3a1714;
-    --info-bg: #182638;
-    --mute-bg: #2a2a27;
+    --bg: #111612;
+    --surface: #171e19;
+    --surface-2: #1f2822;
+    --border: rgb(183 198 194 / 0.12);
+    --text: #f4f7f5;
+    --text-2: rgb(244 247 245 / 0.75);
+    --text-3: rgb(183 198 194 / 0.8);
+    --series-1: #8ff0a4;
+    --series-2: #f08a68;
+    --good: #6ee49a;
+    --good-bg: #13301f;
+    --warn: #f3c062;
+    --warn-bg: #36290f;
+    --bad: #ff8b80;
+    --bad-bg: #3b1714;
+    --info-bg: #1b2d26;
+    --mute-bg: #242d27;
+    --grid-line: rgb(183 198 194 / 0.07);
   }
 }
 
 body {
   background: var(--bg);
   color: var(--text);
-  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-family: var(--font-sans);
   font-size: 15px;
-  line-height: 1.5;
+  line-height: 1.55;
   -webkit-font-smoothing: antialiased;
 }
 
+/* Display type: Anton, always uppercase, tight leading. */
+.display { font-family: var(--font-display); text-transform: uppercase; letter-spacing: normal; line-height: 0.9; font-weight: 400; }
+
 .num { font-variant-numeric: tabular-nums; }
 
+/* 40px grid pattern for hero bands. */
+.grid-bg {
+  background-image:
+    linear-gradient(to right, var(--grid-line) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--grid-line) 1px, transparent 1px);
+  background-size: 40px 40px;
+}
+
+/* Skewed green bar behind a key word in a headline. */
+.hl { position: relative; z-index: 0; display: inline-block; padding: 0 0.12em; color: var(--ink); }
+.hl::before {
+  content: ""; position: absolute; z-index: -1; inset: 0.08em -0.04em 0.02em;
+  background: var(--green); transform: skewX(-15deg);
+}
+
+/* Cards that respond to the pointer: 300 ms ease for lift and shadow. */
+.lift { transition: transform 300ms cubic-bezier(0.4, 0, 0.2, 1), box-shadow 300ms cubic-bezier(0.4, 0, 0.2, 1); }
+.lift:hover { transform: translateY(-2px); box-shadow: 0 14px 32px -18px rgb(23 30 25 / 0.35); }
+@media (prefers-reduced-motion: reduce) { .lift, .lift:hover { transition: none; transform: none; } }
+
+@layer base {
 input, select, textarea {
   background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 6px 10px;
+  border: 1px solid rgb(23 30 25 / 0.2);
+  border-radius: 10px;
+  padding: 8px 12px;
   color: var(--text);
   min-width: 0;
   max-width: 100%;
 }
-input[type="checkbox"] { padding: 0; }
-input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme="light"])) input, :root:where(:not([data-theme="light"])) select, :root:where(:not([data-theme="light"])) textarea { border-color: rgb(183 198 194 / 0.2); }
+}
+input[type="checkbox"] { padding: 0; accent-color: var(--ink); }
+input:focus, select:focus, textarea:focus { outline: 2px solid var(--green); outline-offset: 1px; border-color: var(--ink); }
+
+}
 
 table.data { width: 100%; border-collapse: collapse; }
-table.data th { text-align: left; font-weight: 500; color: var(--text-3); font-size: 13px; padding: 8px 10px; border-bottom: 1px solid var(--border); white-space: nowrap; }
-table.data td { padding: 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
+table.data th { text-align: left; font-weight: 700; color: var(--text-3); font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; padding: 10px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+table.data td { padding: 12px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
 table.data tbody tr:last-child td { border-bottom: 0; }
 table.data tbody tr:hover td { background: var(--surface-2); }
+table.data td.r, table.data th.r { text-align: right; }
+
 details > summary { list-style: none; }
 details > summary::-webkit-details-marker { display: none; }
 details > summary::before { content: "▸"; display: inline-block; width: 1em; transition: transform .15s; color: var(--text-3); }
 details[open] > summary::before { transform: rotate(90deg); }
-table.data td.r, table.data th.r { text-align: right; }
 
 /* Phones: a wide table scrolls inside its own box instead of pushing the whole page sideways. */
 @media (max-width: 640px) {
